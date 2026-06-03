@@ -33,6 +33,44 @@ API docs: http://localhost:8000/docs
 UI: http://localhost:5173
 
 ---
+# TradeVed
+
+Frontend:
+React + Vite + TS
+
+Backend:
+FastAPI
+
+Testing:
+- test_all.py
+- qa_validation.py
+
+Design:
+Figma is source of truth
+
+Research:
+Use Exa
+
+Documentation:
+Use Context7
+
+UI Validation:
+Use Playwright
+
+Production Bugs:
+Use Sentry
+
+Browser Testing:
+Use Browserbase
+
+Market Regimes:
+Bull, Bear, Sideways
+
+Validation:
+Walk Forward
+Out of Sample
+Monte Carlo
+Stress Testing
 
 ## Repo Layout
 

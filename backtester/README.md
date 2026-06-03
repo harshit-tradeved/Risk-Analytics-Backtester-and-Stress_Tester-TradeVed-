@@ -16,11 +16,11 @@ Full-stack quantitative backtesting and stress-testing platform for **crypto**, 
 Stop-Process -Id (Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue).OwningProcess -Force -ErrorAction SilentlyContinue
 
 # Terminal 1 — Backend (FastAPI on :8000)
-cd "C:\Users\Harshit Kumar\Downloads\TradeVed Backtester\backtester"
+cd backtester
 python main.py
 
 # Terminal 2 — Frontend (Vite on :5173)
-cd "C:\Users\Harshit Kumar\Downloads\TradeVed Backtester\backtester\frontend"
+cd backtester/frontend
 npm run dev -- --port 5173
 ```
 
@@ -60,7 +60,6 @@ backtester/
 ├── models.py                  # Pydantic request/response schemas
 ├── run_backtest.py            # CLI entrypoint (no server needed)
 ├── test_all.py                # 37-test pytest suite
-├── stress_validation.py       # 207-test stress validation (13×3×3 combos)
 │
 ├── data/
 │   ├── fetcher.py             # OHLCV: Binance, CoinGecko, yfinance
@@ -101,10 +100,7 @@ backtester/
 │
 ├── optimizer_results/         # CSV + HTML output from optimizer runs
 ├── crypto_optimizer.py        # Grid/DCA/PLA sweep on BTC/ETH/BNB/SOL
-├── indian_futures_optimizer.py# Grid/DCA/PLA sweep on NSE F&O (792 runs)
-├── show_results.py            # Print top results from optimizer CSV
-├── explain_india_results.py   # Detailed Indian results breakdown
-└── verify_results.py          # Cross-check crypto results vs Binance
+└── indian_futures_optimizer.py# Grid/DCA/PLA sweep on NSE F&O (792 runs)
 ```
 
 ---
@@ -183,11 +179,8 @@ F&O: invest amount must cover at least 1 lot (lot_size × price). If not, the ba
 
 ```powershell
 # Unit/integration tests (37 tests)
-cd "C:\Users\Harshit Kumar\Downloads\TradeVed Backtester\backtester"
+cd backtester
 python -m pytest test_all.py -v
-
-# Stress validation (207 tests — requires backend on :8000)
-python stress_validation.py
 ```
 
 ---

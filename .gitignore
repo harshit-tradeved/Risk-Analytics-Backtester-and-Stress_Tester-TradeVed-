@@ -29,3 +29,13 @@ optimizer_results/
 # Large binary / model files
 *.pkl
 *.joblib
+
+# Stray log / output files
+*.log
+qa_run_output*.txt
+qa_reportscore_run_log.txt
+
+# Playwright
+frontend/test-results/
+frontend/tests/
+frontend/playwright.config.ts
