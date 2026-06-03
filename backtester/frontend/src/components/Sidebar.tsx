@@ -33,7 +33,7 @@ const APPROX_PRICES_EXTRA: Record<string, number> = {
 function computeSmartDefaults(form: FormState): { updates: Partial<FormState>; hint: string } {
   const { symbol, source, marketType } = form;
   const isIndian   = source === 'nse' || source === 'bse';
-  const isCrypto   = source === 'binance' || source === 'coingecko';
+  const isCrypto   = source === 'binance';
   const isFutures  = marketType === 'futures' || marketType === 'options';
 
   const lotSize    = FO_LOT_SIZES[symbol] ?? 1;
@@ -213,14 +213,6 @@ const SYMBOL_OPTIONS: Record<string, { value: string; label: string }[]> = {
     { value: 'LINK/USDT', label: 'LINK/USDT — Chainlink'  },
     { value: '__custom__', label: '✏️ Custom…'             },
   ],
-  coingecko: [
-    { value: 'BTC/USDT',  label: 'BTC/USDT — Bitcoin'     },
-    { value: 'ETH/USDT',  label: 'ETH/USDT — Ethereum'    },
-    { value: 'BNB/USDT',  label: 'BNB/USDT — BNB'         },
-    { value: 'SOL/USDT',  label: 'SOL/USDT — Solana'      },
-    { value: 'XRP/USDT',  label: 'XRP/USDT — Ripple'      },
-    { value: '__custom__', label: '✏️ Custom…'             },
-  ],
   yfinance: [
     { value: 'AAPL',  label: 'AAPL — Apple'           },
     { value: 'MSFT',  label: 'MSFT — Microsoft'        },
@@ -395,9 +387,8 @@ export default function Sidebar({ form, onChange, onRun, loading }: SidebarProps
             }}
           >
             {[
-              {value: 'binance',   label: 'Binance'},
-              {value: 'coingecko', label: 'CoinGecko'},
-              {value: 'yfinance',  label: 'Yahoo Finance'},
+              {value: 'binance',  label: 'Binance'},
+              {value: 'yfinance', label: 'Yahoo Finance'},
               {value: 'nse',       label: 'NSE (India)'},
               {value: 'bse',       label: 'BSE (India)'},
             ].map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -440,14 +431,10 @@ export default function Sidebar({ form, onChange, onRun, loading }: SidebarProps
           <label className="text-xs text-[var(--tv-muted)] block mb-1.5">Date Range</label>
           <div className="flex flex-wrap gap-1.5">
             {([
-              { label: '1M',  months: 1  },
-              { label: '3M',  months: 3  },
-              { label: '6M',  months: 6  },
-              { label: '1Y',  months: 12 },
-              { label: '2Y',  months: 24 },
-              { label: '3Y',  months: 36 },
-              { label: '5Y',  months: 60 },
-              { label: '10Y', months: 120},
+              { label: '1M', months: 1  },
+              { label: '3M', months: 3  },
+              { label: '6M', months: 6  },
+              { label: '1Y', months: 12 },
             ] as const).map(({ label, months }) => {
               const isActive = form.datePreset === label;
               return (
