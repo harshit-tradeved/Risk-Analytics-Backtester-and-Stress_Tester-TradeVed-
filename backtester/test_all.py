@@ -557,7 +557,7 @@ def test_regime_tf_aware():
 
     # 4h: same date range but 6 candles/day → 6 × 252 = 1512 candles
     n_4h = n_daily * 6
-    ts_4h = pd.date_range("2022-01-01", periods=n_4h, freq="4H")
+    ts_4h = pd.date_range("2022-01-01", periods=n_4h, freq="4h")
     close_4h = np.interp(np.linspace(0, n_daily - 1, n_4h), np.arange(n_daily), close)
     df_4h = pd.DataFrame({"timestamp": ts_4h, "close": close_4h, "open": close_4h, "high": close_4h*1.01, "low": close_4h*0.99})
 
@@ -673,6 +673,23 @@ def test_stress_monte_carlo_percentiles():
     print(f"  Baseline trades: {result['baseline'].get('num_trades', 0)}")
 
 run_test("Stress MC percentiles P5<=P50<=P95 (Feature B)", test_stress_monte_carlo_percentiles)
+
+
+def test_trade_mc_needs_three_trades():
+    from engine.stress import run_trade_mc
+
+    trades = [
+        {"pnl": 100.0},
+        {"pnl": -50.0},
+    ]
+
+    result = run_trade_mc(trades, capital=10_000, n_runs=50, trade_skip_pct=0.10, seed=1)
+    assert result["runs"] == 0
+    assert result["original_trades"] == 2
+    assert result["trade_skip_pct"] == 0.10
+    assert "note" in result and "Need ≥3 trades" in result["note"]
+
+run_test("trade_mc returns zero runs when fewer than 3 trades (Feature B)", test_trade_mc_needs_three_trades)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SUMMARY
