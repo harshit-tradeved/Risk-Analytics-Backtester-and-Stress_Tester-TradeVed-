@@ -7,15 +7,13 @@ Usage examples:
     python run_backtest.py
     python run_backtest.py --strategy GRID --symbol BTC/USDT --year 2023
     python run_backtest.py --strategy DCA  --symbol ETH/USDT --capital 5000
-    python run_backtest.py --strategy PLA  --source coingecko
-
 Options:
     --symbol      Trading pair (default: BTC/USDT)
     --strategy    GRID | DCA | PLA  (default: GRID)
     --start       Start date YYYY-MM-DD (default: 2023-01-01)
     --end         End date YYYY-MM-DD  (default: 2023-12-31)
     --capital     Initial capital USD  (default: 10000)
-    --source      binance | coingecko | yfinance (default: binance)
+    --source      binance | yfinance | nse | bse (default: binance)
     --interval    1d | 4h | 1h (default: 1d)
     --fee         Fee percent  (default: 0.001)
     --slippage    Slippage %   (default: 0.001)
@@ -267,7 +265,7 @@ def parse_args():
     p.add_argument("--start",    default="2023-01-01")
     p.add_argument("--end",      default="2023-12-31")
     p.add_argument("--capital",  default=10_000.0,     type=float)
-    p.add_argument("--source",   default="binance",    choices=["binance", "coingecko", "yfinance"])
+    p.add_argument("--source",   default="binance",    choices=["binance", "yfinance", "nse", "bse"])
     p.add_argument("--interval", default="1d")
     p.add_argument("--fee",      default=0.001,        type=float)
     p.add_argument("--slippage", default=0.001,        type=float)

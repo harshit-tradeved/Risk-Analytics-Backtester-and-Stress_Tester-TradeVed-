@@ -6,6 +6,15 @@ import os
 import logging
 from pathlib import Path
 
+# Load .env file if present (credentials stay out of tracked code)
+_env_file = Path(__file__).parent / ".env"
+if _env_file.exists():
+    for _line in _env_file.read_text().splitlines():
+        _line = _line.strip()
+        if _line and not _line.startswith("#") and "=" in _line:
+            _k, _, _v = _line.partition("=")
+            os.environ.setdefault(_k.strip(), _v.strip())
+
 # ── Base Paths ──────────────────────────────────────────────────────────────
 BASE_DIR         = Path(__file__).parent
 DATA_STORAGE_DIR = BASE_DIR / "data_storage"
@@ -28,11 +37,26 @@ API_PREFIX      = "/api"
 
 # ── External Data Sources ────────────────────────────────────────────────────
 BINANCE_BASE_URL   = "https://api.binance.com"
-COINGECKO_BASE_URL = "https://api.coingecko.com/api/v3"
 
 # Binance optional API credentials (not required for public OHLCV data)
 BINANCE_API_KEY    = os.getenv("BINANCE_API_KEY", "")
 BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET", "")
+
+# ── TradingView credentials (optional — unlocks 2–3 years of free intraday data) ──
+# Without these: ~10 months of 15m/1h data (no login, free).
+# With a FREE TradingView account: 2–3 years of intraday data.
+# Sign up at https://www.tradingview.com (no credit card needed).
+# Set these as environment variables OR edit the strings below directly.
+TV_USERNAME   = os.getenv("TV_USERNAME", "")    # set in backtester/.env
+TV_PASSWORD   = os.getenv("TV_PASSWORD", "")    # set in backtester/.env
+TV_AUTH_TOKEN = os.getenv("TV_AUTH_TOKEN", "")  # browser cookie — bypasses bot protection
+TV_SESSIONID  = os.getenv("TV_SESSIONID",  "")  # sessionid cookie (Google OAuth users)
+
+# ── Fyers API (9 years of NSE/BSE intraday data, free with demat account) ────
+FYERS_CLIENT_ID    = os.getenv("FYERS_CLIENT_ID",    "")
+FYERS_SECRET_KEY   = os.getenv("FYERS_SECRET_KEY",   "")
+FYERS_REDIRECT_URI = os.getenv("FYERS_REDIRECT_URI", "https://fyers.in")
+FYERS_ACCESS_TOKEN = os.getenv("FYERS_ACCESS_TOKEN", "")  # expires daily; refresh via fyers_auth.py
 
 # ── Trading Defaults ──────────────────────────────────────────────────────────
 DEFAULT_FEE_PERCENT      = 0.001   # 0.1 % Binance taker fee
@@ -66,21 +90,3 @@ logging.basicConfig(
     ],
 )
 
-# ── CoinGecko symbol → coin-id mapping (extend as needed) ────────────────────
-COINGECKO_ID_MAP: dict[str, str] = {
-    "BTC": "bitcoin",
-    "ETH": "ethereum",
-    "BNB": "binancecoin",
-    "SOL": "solana",
-    "ADA": "cardano",
-    "XRP": "ripple",
-    "DOT": "polkadot",
-    "DOGE": "dogecoin",
-    "AVAX": "avalanche-2",
-    "MATIC": "matic-network",
-    "LINK": "chainlink",
-    "UNI": "uniswap",
-    "LTC": "litecoin",
-    "BCH": "bitcoin-cash",
-    "ATOM": "cosmos",
-}

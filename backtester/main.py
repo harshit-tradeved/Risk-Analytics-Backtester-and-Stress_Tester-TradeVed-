@@ -145,7 +145,7 @@ class BacktestRequest(BaseModel):
     capital:    float       = Field(DEFAULT_CAPITAL)
     fee_pct:    float       = Field(DEFAULT_FEE_PERCENT,      description="Legacy % fee (ignored when use_indian_costs=True)")
     slippage:   float       = Field(DEFAULT_SLIPPAGE_PERCENT, description="Market-impact slippage %")
-    source:     str         = Field("binance",   description="binance | coingecko | yfinance | nse | bse")
+    source:     str         = Field("binance",   description="binance | yfinance | nse | bse")
     interval:   str         = Field("1d")
     params:     dict        = Field(default_factory=dict, description="Strategy-specific params")
     # ── Indian market fields ───────────────────────────────────────────────────
@@ -155,6 +155,7 @@ class BacktestRequest(BaseModel):
     brokerage_model:  str   = Field("flat",  description="flat | percentage | zero")
     brokerage_flat:   float = Field(20.0,    description="₹ per order (Zerodha-style flat brokerage)")
     brokerage_pct:    float = Field(0.005,   description="% of turnover for percentage brokerage")
+    synthetic_intraday: bool = Field(False,  description="Generate synthetic 15m/1h candles from daily OHLCV for unlimited history (NSE/BSE only)")
     # ── Out-of-sample validation fields ──────────────────────────────────────
     validation_mode: str   = Field("none",  description="none | holdout | walk_forward")
     train_ratio:     float = Field(0.7,     description="Holdout: fraction of data used for in-sample (0.5–0.9)")
@@ -519,7 +520,8 @@ def run_backtest(req: BacktestRequest, db: Session = Depends(get_db)):
         # ── Fetch data ────────────────────────────────────────────────────────
         start_dt = datetime.combine(req.start_date, datetime.min.time())
         end_dt   = datetime.combine(req.end_date,   datetime.max.time())
-        df       = fetcher.fetch(req.symbol, start_dt, end_dt, req.source, req.interval)
+        df       = fetcher.fetch(req.symbol, start_dt, end_dt, req.source, req.interval,
+                                 synthetic_intraday=getattr(req, "synthetic_intraday", False))
 
         # ── Validate ──────────────────────────────────────────────────────────
         val = validator.validate(df)
@@ -530,14 +532,14 @@ def run_backtest(req: BacktestRequest, db: Session = Depends(get_db)):
         strategy_cls    = STRATEGY_REGISTRY[strategy_name]
         strategy_params = {**strategy_cls.default_params(), **req.params}
 
-        # Auto-compute GRID bounds when both are 0 / equal (UI default)
+        # Auto-compute GRID bounds when both are 0/equal OR when user bounds don't overlap the data
         if strategy_name == "GRID":
             lo = float(strategy_params.get("lower_bound", 0) or 0)
             hi = float(strategy_params.get("upper_bound", 0) or 0)
-            if lo >= hi:
-                prices   = df["close"].astype(float)
-                lo_raw   = float(prices.min())
-                hi_raw   = float(prices.max())
+            prices   = df["close"].astype(float)
+            lo_raw   = float(prices.min())
+            hi_raw   = float(prices.max())
+            if lo >= hi or lo > hi_raw or hi < lo_raw:
                 pad      = (hi_raw - lo_raw) * 0.10
                 strategy_params["lower_bound"] = _round_nice(max(1.0, lo_raw - pad), "floor")
                 strategy_params["upper_bound"] = _round_nice(hi_raw + pad, "ceil")
@@ -648,6 +650,7 @@ def run_backtest(req: BacktestRequest, db: Session = Depends(get_db)):
                     capital         = req.capital,
                     window          = req.wf_window,
                     step            = req.wf_step,
+                    interval        = req.interval,
                 )
 
         # ── Persist results ───────────────────────────────────────────────────
@@ -1027,7 +1030,9 @@ class StressRequest(BaseModel):
     wf_window:           int            = Field(252,   description="Walk-forward train window in candles (default 252 = ~1yr daily)")
     wf_step:             int            = Field(63,    description="Walk-forward OOS step in candles (default 63 = ~1qtr daily)")
     # Regime-aware MC: scale per-run severity by the asset's bull/bear/sideways volatility profile
-    regime_aware_mc:     bool           = Field(False, description="Scale MC run severity by regime-specific realized volatility for physically realistic path fanning")
+    regime_aware_mc:       bool           = Field(False, description="Scale MC run severity by regime-specific realized volatility for physically realistic path fanning")
+    # Synthetic intraday: generate 15m/1h candles from daily OHLCV for unlimited history
+    synthetic_intraday:    bool           = Field(False, description="Generate synthetic intraday from daily OHLCV via Brownian Bridge disaggregation (NSE/BSE only; unlimited free history)")
 
 
 @app.post(f"{API_PREFIX}/stress/run", tags=["Stress"])
@@ -1047,7 +1052,8 @@ def run_stress(req: StressRequest, db: Session = Depends(get_db)):
     try:
         start_dt = datetime.combine(req.start_date, datetime.min.time())
         end_dt   = datetime.combine(req.end_date,   datetime.max.time())
-        df       = fetcher.fetch(req.symbol, start_dt, end_dt, req.source, req.interval)
+        df       = fetcher.fetch(req.symbol, start_dt, end_dt, req.source, req.interval,
+                                 synthetic_intraday=req.synthetic_intraday)
     except Exception as exc:
         raise HTTPException(500, f"Data fetch failed: {exc}")
 
@@ -1064,14 +1070,14 @@ def run_stress(req: StressRequest, db: Session = Depends(get_db)):
     strategy_cls    = STRATEGY_REGISTRY[req.strategy.upper()]
     strategy_params = {**strategy_cls.default_params(), **req.params}
 
-    # Auto-compute GRID bounds when both are 0 / equal (UI default)
+    # Auto-compute GRID bounds when both are 0/equal OR when user bounds don't overlap the data
     if req.strategy.upper() == "GRID":
         lo = float(strategy_params.get("lower_bound", 0) or 0)
         hi = float(strategy_params.get("upper_bound", 0) or 0)
-        if lo >= hi:
-            prices   = df["close"].astype(float)
-            lo_raw   = float(prices.min())
-            hi_raw   = float(prices.max())
+        prices   = df["close"].astype(float)
+        lo_raw   = float(prices.min())
+        hi_raw   = float(prices.max())
+        if lo >= hi or lo > hi_raw or hi < lo_raw:
             pad      = (hi_raw - lo_raw) * 0.10
             strategy_params["lower_bound"] = _round_nice(max(1.0, lo_raw - pad), "floor")
             strategy_params["upper_bound"] = _round_nice(hi_raw + pad, "ceil")
@@ -1129,6 +1135,7 @@ def run_stress(req: StressRequest, db: Session = Depends(get_db)):
                 capital         = req.capital,
                 window          = req.wf_window,
                 step            = req.wf_step,
+                interval        = req.interval,
             )
             wfe = compute_wfe(wf_result)
             if wfe is not None:
@@ -1206,7 +1213,8 @@ async def stream_stress_sse(req: StressRequest, db: Session = Depends(get_db)):
         start_dt = datetime.combine(req.start_date, datetime.min.time())
         end_dt   = datetime.combine(req.end_date,   datetime.max.time())
         df = await asyncio.to_thread(
-            fetcher.fetch, req.symbol, start_dt, end_dt, req.source, req.interval
+            fetcher.fetch, req.symbol, start_dt, end_dt, req.source, req.interval,
+            req.synthetic_intraday,
         )
     except Exception as exc:
         raise HTTPException(500, f"Data fetch failed: {exc}")
@@ -1223,14 +1231,14 @@ async def stream_stress_sse(req: StressRequest, db: Session = Depends(get_db)):
     strategy_cls    = STRATEGY_REGISTRY[req.strategy.upper()]
     strategy_params = {**strategy_cls.default_params(), **req.params}
 
-    # Auto-compute GRID bounds when both are 0 / equal (UI default)
+    # Auto-compute GRID bounds when both are 0/equal OR when user bounds don't overlap the data
     if req.strategy.upper() == "GRID":
         lo = float(strategy_params.get("lower_bound", 0) or 0)
         hi = float(strategy_params.get("upper_bound", 0) or 0)
-        if lo >= hi:
-            prices   = df["close"].astype(float)
-            lo_raw   = float(prices.min())
-            hi_raw   = float(prices.max())
+        prices   = df["close"].astype(float)
+        lo_raw   = float(prices.min())
+        hi_raw   = float(prices.max())
+        if lo >= hi or lo > hi_raw or hi < lo_raw:
             pad      = (hi_raw - lo_raw) * 0.10
             strategy_params["lower_bound"] = _round_nice(max(1.0, lo_raw - pad), "floor")
             strategy_params["upper_bound"] = _round_nice(hi_raw + pad, "ceil")
@@ -1272,20 +1280,9 @@ async def stream_stress_sse(req: StressRequest, db: Session = Depends(get_db)):
 
         n_runs = max(1, req_snap.monte_carlo_runs)
 
-        # ── Walk-forward (optional, before streaming MC runs) ─────────────────
+        # WFE is deferred — runs after all MC paths so baseline appears immediately.
         wf_result_sse: Optional[dict] = None
         wfe_sse: Optional[float] = None
-        if req_snap.run_validation:
-            try:
-                wf_result_sse = await asyncio.to_thread(
-                    run_walk_forward,
-                    df_snap, req_snap.strategy.upper(), strategy_params_,
-                    {**sim_kwargs_, "capital": req_snap.capital},
-                    req_snap.capital, req_snap.wf_window, req_snap.wf_step,
-                )
-                wfe_sse = compute_wfe(wf_result_sse)
-            except Exception as exc:
-                logger.warning("Walk-forward for stress (SSE) failed: %s", exc)
 
         # ── Baseline ─────────────────────────────────────────────────────────
         try:
@@ -1385,6 +1382,20 @@ async def stream_stress_sse(req: StressRequest, db: Session = Depends(get_db)):
                 "metrics": run_data,
                 "equity":  eq_sub,
             })
+
+        # ── Walk-forward (after all MC runs so baseline + paths stream first) ──
+        if req_snap.run_validation:
+            try:
+                wf_result_sse = await asyncio.to_thread(
+                    run_walk_forward,
+                    df_snap, req_snap.strategy.upper(), strategy_params_,
+                    {**sim_kwargs_, "capital": req_snap.capital},
+                    req_snap.capital, req_snap.wf_window, req_snap.wf_step,
+                    req_snap.interval,
+                )
+                wfe_sse = compute_wfe(wf_result_sse)
+            except Exception as exc:
+                logger.warning("Walk-forward for stress (SSE) failed: %s", exc)
 
         # ── Final aggregation ─────────────────────────────────────────────────
         try:
