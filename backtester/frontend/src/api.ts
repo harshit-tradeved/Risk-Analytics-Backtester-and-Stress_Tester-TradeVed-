@@ -132,7 +132,8 @@ export async function runStressTest(form: StressFormState): Promise<StressRespon
     run_validation:   form.runValidation ?? false,
     wf_window:        form.wfWindow ?? 252,
     wf_step:          form.wfStep ?? 63,
-    regime_aware_mc:  form.regimeAwareMC ?? false,
+    regime_aware_mc:      form.regimeAwareMC ?? false,
+    synthetic_intraday:   form.syntheticIntraday ?? false,
   };
   if (form.shockDepthPct     != null) payload.shock_depth_pct     = form.shockDepthPct;
   if (form.shockDurationDays != null) payload.shock_duration_days = form.shockDurationDays;
@@ -213,7 +214,8 @@ export function streamStressTest(
     run_validation:   form.runValidation ?? false,
     wf_window:        form.wfWindow ?? 252,
     wf_step:          form.wfStep ?? 63,
-    regime_aware_mc:  form.regimeAwareMC ?? false,
+    regime_aware_mc:      form.regimeAwareMC ?? false,
+    synthetic_intraday:   form.syntheticIntraday ?? false,
   };
   if (form.shockDepthPct     != null) payload.shock_depth_pct     = form.shockDepthPct;
   if (form.shockDurationDays != null) payload.shock_duration_days = form.shockDurationDays;

@@ -1,5 +1,5 @@
 export type Strategy       = 'GRID' | 'DCA' | 'PLA';
-export type DataSource     = 'binance' | 'coingecko' | 'yfinance' | 'nse' | 'bse';
+export type DataSource     = 'binance' | 'yfinance' | 'nse' | 'bse';
 export type Interval       = '1d' | '4h' | '1h' | '15m' | '1w';
 export type MarketType     = 'equity_delivery' | 'equity_intraday' | 'futures' | 'options' | 'crypto';
 export type BrokerageModel = 'flat' | 'percentage' | 'zero';
@@ -333,6 +333,8 @@ export interface StressFormState {
   wfStep:              number;    // OOS step in candles
   // Regime-aware MC
   regimeAwareMC:       boolean;
+  // Synthetic intraday: generate 15m/1h from daily OHLCV for unlimited history
+  syntheticIntraday:   boolean;
 }
 
 export interface FormState {

@@ -34,9 +34,12 @@ function makeBuckets(values: number[], bucketSize = 5) {
 
 // ─── Shared UI pieces ─────────────────────────────────────────────────────────
 
-function Card({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+function Card({ children, className = '', ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className={`bg-white rounded-2xl border border-gray-100 tv-soft-shadow p-4 ${className}`}>
+    <div
+      {...props}
+      className={`bg-white rounded-2xl border border-gray-100 tv-soft-shadow p-4 ${className}`}
+    >
       {children}
     </div>
   );
@@ -216,15 +219,16 @@ function RobustnessGauge({ rob }: { rob: RobustnessScore }) {
   const axes = rob.axes;
 
   return (
-    <div className={`rounded-2xl border p-4 ${cfg.bg} border-opacity-40`}
-         style={{ borderColor: cfg.ring + '66' }}>
+    <div data-testid="robustness-gauge"
+         className="rounded-2xl border border-gray-100 bg-white p-4 shadow-none"
+         style={{ borderLeft: `4px solid ${cfg.ring}` }}>
 
       {/* Header */}
-      <div className="flex items-start gap-4 flex-wrap">
+      <div className="flex items-center gap-4 flex-wrap">
 
         {/* SVG semi-circle dial */}
-        <div className="flex-shrink-0">
-          <svg width="144" height="82" viewBox="0 0 144 82">
+        <div className="flex-shrink-0 flex justify-center" style={{ width: 144 }}>
+          <svg width="144" height="90" viewBox="0 0 144 90" style={{ overflow: 'visible' }}>
             {/* Track */}
             <path d={`M ${start.x} ${cy} A ${R} ${R} 0 0 1 ${cx + R} ${cy}`}
               fill="none" stroke="#e5e7eb" strokeWidth="10" strokeLinecap="round" />
@@ -467,7 +471,7 @@ function TradeMCCard({ tmc }: { tmc: TradeMCResult }) {
   const returnHistData = useMemo(() => makeBuckets(tmc.per_run.map(r => r.return_pct)), [tmc]);
 
   return (
-    <Card>
+    <Card data-testid="trade-mc-card">
       <SectionTitle
         sub={`${tmc.runs} runs · ${skipPct}% of ${tmc.original_trades} trades randomly skipped + reshuffled per run`}
       >
@@ -556,7 +560,7 @@ function RegimeMCInfoCard({ info }: { info: RegimeMCInfo }) {
   const LABELS: Record<string, string> = { bull: 'Bull', bear: 'Bear', sideways: 'Sideways' };
 
   return (
-    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+    <div data-testid="regime-mc-card" className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
       <div className="flex items-center gap-2 mb-3">
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-600 text-white">
           Regime-aware MC active
@@ -934,7 +938,7 @@ export default function StressResults({ result, currency, locale }: Props) {
           )}
 
           {/* Trade-level MC card */}
-          {trade_mc && trade_mc.runs > 0 && <TradeMCCard tmc={trade_mc} />}
+          {trade_mc && <TradeMCCard tmc={trade_mc} />}
 
           {/* Regime-aware MC info */}
           {regime_mc_info?.enabled && <RegimeMCInfoCard info={regime_mc_info} />}

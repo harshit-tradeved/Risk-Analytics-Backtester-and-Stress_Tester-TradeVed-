@@ -141,7 +141,11 @@ function LiveLoadingView({
               ))}
             </div>
             <p className="text-sm font-medium">Fetching market data &amp; computing baseline…</p>
-            <p className="text-xs text-gray-300">Indian/NSE data can take 10–30 s via yfinance</p>
+            <p className="text-xs text-gray-300">
+              {form.runValidation
+                ? 'Running walk-forward validation before MC runs — may take 15–60 s'
+                : 'Indian/NSE data can take 10–30 s via yfinance'}
+            </p>
           </div>
         )}
       </div>

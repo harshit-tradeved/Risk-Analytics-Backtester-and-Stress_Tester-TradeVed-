@@ -68,14 +68,6 @@ const SYMBOL_OPTIONS: Record<string, { value: string; label: string }[]> = {
     { value: 'LINK/USDT',  label: 'LINK/USDT — Chainlink' },
     { value: '__custom__', label: '✏️ Custom…'              },
   ],
-  coingecko: [
-    { value: 'BTC/USDT',  label: 'BTC/USDT — Bitcoin'  },
-    { value: 'ETH/USDT',  label: 'ETH/USDT — Ethereum' },
-    { value: 'BNB/USDT',  label: 'BNB/USDT — BNB'      },
-    { value: 'SOL/USDT',  label: 'SOL/USDT — Solana'   },
-    { value: 'XRP/USDT',  label: 'XRP/USDT — Ripple'   },
-    { value: '__custom__', label: '✏️ Custom…'           },
-  ],
   yfinance: [
     { value: 'AAPL',  label: 'AAPL — Apple'        },
     { value: 'MSFT',  label: 'MSFT — Microsoft'    },
@@ -144,7 +136,7 @@ const APPROX_PRICES: Record<string, number> = {
 function computeSmartDefaults(form: StressFormState): { updates: Partial<StressFormState>; hint: string } {
   const { symbol, source, marketType, scenarioKey } = form;
   const isIndian  = source === 'nse' || source === 'bse';
-  const isCrypto  = source === 'binance' || source === 'coingecko';
+  const isCrypto  = source === 'binance';
   const isFutures = marketType === 'futures' || marketType === 'options';
 
   const lotSize  = FO_LOT_SIZES[symbol] ?? 1;
@@ -168,7 +160,7 @@ function computeSmartDefaults(form: StressFormState): { updates: Partial<StressF
       const plaBase    = round10k(investBuy * 0.35);
       const glo = Math.floor(price * 0.90 / 500) * 500;
       const ghi = Math.ceil(price * 1.10 / 500) * 500;
-      hint = `${symbol} futures: lot ${lotSize} × ≈₹${Math.round(price).toLocaleString('en-IN')} → ₹${investBuy.toLocaleString('en-IN')}/order · ₹${capital.toLocaleString('en-IN')} capital`;
+      hint = `${symbol} futures: lot ${lotSize} × ≈₹${Math.round(price).toLocaleString('en-IN')} → ₹${investBuy.toLocaleString('en-IN')}/order · ₹${capital.toLocaleString('en-IN')} capital · 15m synthetic`;
       stratUpdates = {
         capital, dcaInvestPerBuy: investBuy, buyIntervalHours: 24, holdDays: 7,
         dcaExitType: 'profit', profitTargetPct: 5,
@@ -177,7 +169,7 @@ function computeSmartDefaults(form: StressFormState): { updates: Partial<StressF
         plaInvestPerLevel: plaBase, fastEma: 9, slowEma: 21,
         plaExitType: 'take_profit', takeProfitPct: 5,
         plaLvl2Pct: -1, plaLvl3Pct: -2.5, plaLvl4Pct: -4,
-        interval: '1d', feePct: 0.1, slippagePct: 0.05,
+        interval: '15m', syntheticIntraday: true, feePct: 0.1, slippagePct: 0.05,
       };
     } else {
       const rawInvest = Math.max(10_000, price * 15);
@@ -186,7 +178,7 @@ function computeSmartDefaults(form: StressFormState): { updates: Partial<StressF
       const plaBase   = round10k(investBuy * 0.6);
       const glo = Math.floor(price * 0.90 / 500) * 500;
       const ghi = Math.ceil(price * 1.10 / 500) * 500;
-      hint = `${symbol} equity: ≈₹${Math.round(price).toLocaleString('en-IN')}/share → ₹${investBuy.toLocaleString('en-IN')}/order · ₹${capital.toLocaleString('en-IN')} capital`;
+      hint = `${symbol} equity: ≈₹${Math.round(price).toLocaleString('en-IN')}/share → ₹${investBuy.toLocaleString('en-IN')}/order · ₹${capital.toLocaleString('en-IN')} capital · 15m synthetic`;
       stratUpdates = {
         marketType: 'equity_delivery', capital, lowerBound: glo, upperBound: ghi,
         dcaInvestPerBuy: investBuy, buyIntervalHours: 24, holdDays: 30,
@@ -195,7 +187,7 @@ function computeSmartDefaults(form: StressFormState): { updates: Partial<StressF
         plaInvestPerLevel: plaBase, fastEma: 12, slowEma: 26,
         plaExitType: 'take_profit', takeProfitPct: 8,
         plaLvl2Pct: -1, plaLvl3Pct: -2.5, plaLvl4Pct: -4,
-        interval: '1d', feePct: 0.1, slippagePct: 0.05,
+        interval: '15m', syntheticIntraday: true, feePct: 0.1, slippagePct: 0.05,
       };
     }
   } else if (isCrypto) {
@@ -247,9 +239,9 @@ export const DEFAULT_STRESS_FORM: StressFormState = {
   symbol:       'BTC/USDT',
   customSymbol: '',
   source:       'binance',
-  startDate:    '2022-01-01',
+  startDate:    '2023-01-01',
   endDate:      '2024-01-01',
-  datePreset:   '2Y',
+  datePreset:   '1Y',
   interval:     '1d',
   capital:      10000,
   feePct:       0.1,
@@ -287,7 +279,8 @@ export const DEFAULT_STRESS_FORM: StressFormState = {
   runValidation:   false,
   wfWindow:        252,
   wfStep:          63,
-  regimeAwareMC:   false,
+  regimeAwareMC:      false,
+  syntheticIntraday:  false,
 };
 
 // ── Shared input class (matches backtest sidebar style) ───────────────────────
@@ -342,8 +335,6 @@ export default function StressSidebar({ form, onChange, onRun, loading }: Props)
   const datePresets = [
     { label: '1M', months: 1 },  { label: '3M', months: 3 },
     { label: '6M', months: 6 },  { label: '1Y', months: 12 },
-    { label: '2Y', months: 24 }, { label: '3Y', months: 36 },
-    { label: '5Y', months: 60 },
   ] as const;
 
   const currentSymbols = SYMBOL_OPTIONS[form.source] ?? SYMBOL_OPTIONS['binance'];
@@ -358,12 +349,12 @@ export default function StressSidebar({ form, onChange, onRun, loading }: Props)
 
           <label className={lbl}>Source</label>
           <select
+            data-testid="source-select"
             value={form.source}
             onChange={e => handleSourceChange(e.target.value as DataSource)}
             className={`${inp} mb-2`}
           >
             <option value="binance">Binance (Crypto)</option>
-            <option value="coingecko">CoinGecko (Crypto)</option>
             <option value="yfinance">Yahoo Finance (US)</option>
             <option value="nse">NSE (India)</option>
             <option value="bse">BSE (India)</option>
@@ -390,9 +381,32 @@ export default function StressSidebar({ form, onChange, onRun, loading }: Props)
           )}
 
           <label className={lbl}>Interval</label>
-          <select value={form.interval} onChange={e => set({ interval: e.target.value as Interval })} className={`${inp} mb-2`}>
+          <select value={form.interval} onChange={e => set({ interval: e.target.value as Interval })} className={`${inp} mb-1`}>
             {(['15m','1h','4h','1d','1w'] as Interval[]).map(i => <option key={i} value={i}>{i}</option>)}
           </select>
+          {(form.source === 'nse' || form.source === 'bse') && ['15m','1h','4h'].includes(form.interval) && (
+            <div className="mb-2 rounded-lg border border-blue-100 bg-blue-50 px-2 py-1.5">
+              <div className="flex items-center justify-between mb-0.5">
+                <p className="text-[10px] text-blue-700 font-medium">
+                  {form.syntheticIntraday
+                    ? 'Synthetic 15m — unlimited history, from daily OHLCV'
+                    : 'Real 15m via TradingView — free, ~10 months'}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => set({ syntheticIntraday: !form.syntheticIntraday })}
+                  className={`relative w-8 h-4 rounded-full transition-colors flex-shrink-0 ml-2 ${form.syntheticIntraday ? 'bg-blue-500' : 'bg-gray-300'}`}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full shadow transition-transform ${form.syntheticIntraday ? 'translate-x-4' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <p className="text-[10px] text-blue-500">
+                {form.syntheticIntraday
+                  ? 'Brownian Bridge disaggregation of daily data. Statistically consistent; ideal for multi-year backtests.'
+                  : 'Toggle on for 2–10 year backtests. Generates realistic intraday paths from daily OHLCV.'}
+              </p>
+            </div>
+          )}
 
           {/* Date presets */}
           <label className={lbl}>Date Range</label>
@@ -669,7 +683,8 @@ export default function StressSidebar({ form, onChange, onRun, loading }: Props)
           <label className={lbl}>Monte Carlo Runs</label>
           <div className="flex gap-1 mb-2 bg-gray-100 rounded-full p-1">
             {[50, 100, 250, 500].map(n => (
-              <button key={n} onClick={() => set({ mcRuns: n })}
+              <button key={n} data-testid={n === 50 ? 'mc-runs-50' : n === 100 ? 'mc-runs-100' : undefined}
+                onClick={() => set({ mcRuns: n })}
                 className={`flex-1 py-1 text-xs font-semibold rounded-full transition
                   ${form.mcRuns === n
                     ? 'bg-white text-[var(--tv-accent)] shadow-sm'
@@ -695,7 +710,8 @@ export default function StressSidebar({ form, onChange, onRun, loading }: Props)
           </p>
           <div className="flex gap-1 mb-2 bg-gray-100 rounded-full p-1">
             {[0, 100, 200, 500].map(n => (
-              <button key={n} onClick={() => set({ tradeMcRuns: n })}
+              <button key={n} data-testid={n === 100 ? 'trade-mc-100' : undefined}
+                onClick={() => set({ tradeMcRuns: n })}
                 className={`flex-1 py-1 text-xs font-semibold rounded-full transition
                   ${form.tradeMcRuns === n
                     ? 'bg-white text-purple-600 shadow-sm'
@@ -726,6 +742,7 @@ export default function StressSidebar({ form, onChange, onRun, loading }: Props)
             </label>
             <button
               type="button"
+              data-testid="wf-toggle"
               onClick={() => set({ runValidation: !form.runValidation })}
               className={`relative w-10 h-5 rounded-full transition-colors ${form.runValidation ? 'bg-[var(--tv-accent)]' : 'bg-gray-200'}`}
             >
@@ -735,17 +752,17 @@ export default function StressSidebar({ form, onChange, onRun, loading }: Props)
           {form.runValidation && (
             <div className="space-y-1.5 mt-2">
               <p className="text-[10px] text-[var(--tv-muted)] bg-indigo-50 rounded-lg px-2 py-1.5 border border-indigo-100">
-                Runs walk-forward optimization to compute Walk-Forward Efficiency (OOS Sharpe / IS Sharpe) — upgrades the Robustness Score from provisional to full 4-axis. Adds ~10–30 s depending on data length.
+                Runs walk-forward optimization to compute Walk-Forward Efficiency (OOS Sharpe / IS Sharpe) — upgrades the Robustness Score from provisional to full 4-axis. Values are in <strong>trading days</strong>; the backend auto-scales to candles for intraday intervals.
               </p>
               <div className="flex gap-2">
                 <div className="flex-1">
-                  <label className="text-[10px] text-[var(--tv-muted)] block mb-0.5">Train window (candles)</label>
+                  <label className="text-[10px] text-[var(--tv-muted)] block mb-0.5">Train window (trading days)</label>
                   <input type="number" min={60} max={504} value={form.wfWindow}
                     onChange={e => set({ wfWindow: Math.max(60, Math.min(504, +e.target.value)) })}
                     className={inp} />
                 </div>
                 <div className="flex-1">
-                  <label className="text-[10px] text-[var(--tv-muted)] block mb-0.5">OOS step (candles)</label>
+                  <label className="text-[10px] text-[var(--tv-muted)] block mb-0.5">OOS step (trading days)</label>
                   <input type="number" min={20} max={126} value={form.wfStep}
                     onChange={e => set({ wfStep: Math.max(20, Math.min(126, +e.target.value)) })}
                     className={inp} />
@@ -764,6 +781,7 @@ export default function StressSidebar({ form, onChange, onRun, loading }: Props)
             </label>
             <button
               type="button"
+              data-testid="regime-aware-toggle"
               onClick={() => set({ regimeAwareMC: !form.regimeAwareMC })}
               className={`relative w-10 h-5 rounded-full transition-colors ${form.regimeAwareMC ? 'bg-[var(--tv-accent)]' : 'bg-gray-200'}`}
             >
@@ -794,7 +812,7 @@ export default function StressSidebar({ form, onChange, onRun, loading }: Props)
         )}
 
         {/* ── Run button ───────────────────────────────────────────────── */}
-        <button onClick={onRun} disabled={loading}
+        <button data-testid="run-stress-button" onClick={onRun} disabled={loading}
           className="w-full py-3 rounded-full font-bold text-sm transition-all
             bg-[var(--tv-accent)] hover:opacity-90 text-white shadow-sm
             disabled:opacity-50 disabled:cursor-not-allowed">
