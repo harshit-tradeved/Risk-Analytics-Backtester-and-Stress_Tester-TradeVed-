@@ -29,6 +29,22 @@ from engine.metrics import calculate_metrics
 from engine.simulator import TradeSimulator
 from strategies import STRATEGY_REGISTRY
 
+# Trading candles per day for common intervals (conservative — biased toward fewer windows)
+_INTERVAL_TRADING_CPD: dict[str, float] = {
+    "1m":  390,  # 6.5h × 60 (US); NSE ~375
+    "5m":  78,
+    "15m": 26,   # US; NSE ≈ 25 — close enough
+    "30m": 13,
+    "1h":  7,    # rounds up from 6.5
+    "2h":  3,
+    "4h":  2,
+    "6h":  1,
+    "8h":  1,
+    "1d":  1,
+    "1w":  0.2,
+    "1M":  0.05,
+}
+
 logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -37,7 +53,7 @@ logger = logging.getLogger(__name__)
 # Deliberately small (≤ 24 combos per strategy) so walk-forward completes
 # within a few seconds per window.
 
-def _wf_grid(strategy: str, lower: float = 0, upper: float = 0, capital: float = 10_000) -> list[dict]:
+def _wf_grid(strategy: str, lower: float = 0, upper: float = 0, capital: float = 10_000, user_params: dict | None = None) -> list[dict]:
     # Invest amounts scale with capital so Indian ₹20L runs don't use ₹200 lots.
     # Fractions: 1%, 3%, 8% of capital per order — small enough to diversify,
     # large enough to clear lot-size minimums on large-capital Indian instruments.
@@ -61,9 +77,12 @@ def _wf_grid(strategy: str, lower: float = 0, upper: float = 0, capital: float =
         return rows  # 18 combos
 
     if strategy == "DCA":
+        # Always include user's actual invest amount so futures/large-lot instruments get at least one valid combo
+        user_invest = float((user_params or {}).get("invest_per_buy_usd", 0) or 0)
+        invest_set  = sorted({inv_sm, inv_md, inv_lg, user_invest} - {0.0})
         rows = []
         for interval_h in [24, 48, 72]:
-            for invest in [inv_sm, inv_md]:
+            for invest in invest_set:
                 for hold_days in [14, 30]:
                     for exit_type, tp in [("time", 5.0), ("profit", 10.0)]:
                         rows.append({
@@ -74,7 +93,7 @@ def _wf_grid(strategy: str, lower: float = 0, upper: float = 0, capital: float =
                             "exit_type":          exit_type,
                             "profit_target_pct":  tp,
                         })
-        return rows  # 24 combos
+        return rows
 
     if strategy == "PLA":
         rows = []
@@ -112,13 +131,13 @@ def _segment_metrics(
     Returns None if something fails (e.g. 0 trades), so callers can skip.
     """
     try:
-        # Auto-compute GRID bounds from this slice if needed
+        # Auto-compute GRID bounds from this slice if needed or if user bounds don't overlap data
         if strategy_cls.__name__ == "GridStrategy":
             lo = float(strategy_params.get("lower_bound", 0) or 0)
             hi = float(strategy_params.get("upper_bound", 0) or 0)
-            if lo >= hi:
-                prices = df["close"].astype(float)
-                lo_raw, hi_raw = float(prices.min()), float(prices.max())
+            prices = df["close"].astype(float)
+            lo_raw, hi_raw = float(prices.min()), float(prices.max())
+            if lo >= hi or lo > hi_raw or hi < lo_raw:
                 pad = (hi_raw - lo_raw) * 0.10
                 strategy_params = dict(strategy_params)
                 strategy_params["lower_bound"] = max(1.0, lo_raw - pad)
@@ -185,14 +204,14 @@ def run_holdout(
         len(df_train), 100 * train_ratio, len(df_test), split_date,
     )
 
-    # For GRID: compute bounds on train, carry to test
+    # For GRID: compute bounds on train, carry to test; also override if user bounds don't overlap data
     train_params = dict(strategy_params)
     if strategy_name == "GRID":
         lo = float(train_params.get("lower_bound", 0) or 0)
         hi = float(train_params.get("upper_bound", 0) or 0)
-        if lo >= hi:
-            prices = df_train["close"].astype(float)
-            lo_raw, hi_raw = float(prices.min()), float(prices.max())
+        prices = df_train["close"].astype(float)
+        lo_raw, hi_raw = float(prices.min()), float(prices.max())
+        if lo >= hi or lo > hi_raw or hi < lo_raw:
             pad = (hi_raw - lo_raw) * 0.10
             train_params["lower_bound"] = max(1.0, lo_raw - pad)
             train_params["upper_bound"] = hi_raw + pad
@@ -277,6 +296,7 @@ def run_walk_forward(
     capital:         float,
     window:          int = 252,
     step:            int = 63,
+    interval:        str = "1d",
 ) -> dict[str, Any]:
     """
     Classic walk-forward: grid-search on each train window, apply best params
@@ -291,6 +311,31 @@ def run_walk_forward(
         }
     """
     n = len(df)
+
+    # Scale window/step from trading-day units to candles for intraday data.
+    # window/step defaults (252/63) mean "1yr IS / 1qtr OOS" in trading-day terms.
+    # For intraday intervals, multiply by candles-per-trading-day to preserve
+    # that semantic meaning and keep the window count in a sane range.
+    cpd = _INTERVAL_TRADING_CPD.get(interval, 1.0)
+    if cpd > 1.0:
+        window = min(int(window * cpd), int(n * 0.75))
+        step   = max(1, int(step   * cpd))
+        logger.info(
+            "Walk-forward: interval=%s (cpd=%.1f) → scaled window=%d step=%d",
+            interval, cpd, window, step,
+        )
+
+    # Proportional fallback: if the scaled window+step exceeds the dataset or would
+    # yield < 2 windows, use 60% train / 20% step so WFE is always computable.
+    natural_windows = max(0, (n - window) // step) if step > 0 else 0
+    if n < window + step or natural_windows < 2:
+        window = int(n * 0.60)
+        step   = max(1, int(n * 0.20))
+        logger.info(
+            "Walk-forward: short dataset (%d candles) → proportional window=%d step=%d",
+            n, window, step,
+        )
+
     if n < window + step:
         logger.warning(
             "Walk-forward: not enough data (%d candles, need at least %d). "
@@ -333,7 +378,7 @@ def run_walk_forward(
             lo  = max(1.0, lo_raw - pad)
             hi  = hi_raw + pad
 
-        combos = _wf_grid(strategy_name, lower=lo, upper=hi, capital=capital)
+        combos = _wf_grid(strategy_name, lower=lo, upper=hi, capital=capital, user_params=strategy_params)
         best_params  = None
         best_sharpe  = -np.inf
         best_metrics = None

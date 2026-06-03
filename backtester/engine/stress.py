@@ -21,7 +21,7 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
-from engine.metrics import calculate_metrics, _candles_per_day
+from engine.metrics import calculate_metrics
 from engine.regimes import classify_regimes
 from engine.simulator import TradeSimulator
 
@@ -328,7 +328,12 @@ def run_trade_mc(
     Requires at least 3 trades to be meaningful; returns {"runs": 0} otherwise.
     """
     if len(trades) < 3:
-        return {"runs": 0, "note": "Need ≥3 trades for trade-level MC."}
+        return {
+            "runs":            0,
+            "trade_skip_pct":  trade_skip_pct,
+            "original_trades": len(trades),
+            "note":            "Need ≥3 trades for trade-level MC.",
+        }
 
     rng     = np.random.default_rng(seed)
     n_runs  = max(1, n_runs)
@@ -602,7 +607,14 @@ def apply_stress(
     if n < 2:
         return out
 
-    cpd   = _candles_per_day(df["timestamp"].tolist()) if "timestamp" in df.columns else 1.0
+    # Use actual candles-per-trading-day (count unique dates) so intraday data
+    # (NSE 15m = 26 candles/day) doesn't stretch scenario durations by 3-4×.
+    if "timestamp" in df.columns and len(df) > 1:
+        ts = pd.to_datetime(df["timestamp"])
+        n_days = ts.dt.date.nunique()
+        cpd = max(1.0, len(df) / max(1, n_days))
+    else:
+        cpd = 1.0
     shock = scenario.shock_depth_pct * severity
     vmult = 1.0 + (scenario.vol_multiplier - 1.0) * severity
     dur_c = max(1, round(scenario.shock_duration_days * cpd))
@@ -650,6 +662,11 @@ def apply_stress(
     elif sname == "liquidity_drought":
         smult = max(1.0, scenario.spread_multiplier * severity)
         _apply_vol_scale(out, start, end, smult)
+        # Wide spreads also cause erratic close prices (harder to fill at mid-market);
+        # add chop so each MC run gets a distinct price path
+        chop = (smult - 1.0) * 0.4 * severity
+        if chop > 0:
+            _apply_chop(out, start, end, chop, rng, mean_revert=False)
 
     elif sname == "pump_dump":
         # Pump then dump back below start — dump persists
@@ -669,12 +686,22 @@ def apply_stress(
 
     elif sname == "vol_spike":
         _apply_vol_scale(out, start, end, vmult)
+        # Vol spikes randomise where close lands within the expanded candle range;
+        # apply chop noise to close prices so MC runs diverge realistically
+        chop = (vmult - 1.0) * 1.5 * severity
+        if chop > 0:
+            _apply_chop(out, start, end, chop, rng, mean_revert=False)
 
     elif sname == "gap_risk":
         gc = max(1, round(scenario.gap_count * severity))
         g_indices = sorted(rng.choice(max(1, n - 1), size=min(gc, max(1, n - 1)), replace=False).tolist())
         g_pcts    = rng.uniform(scenario.gap_min_pct, scenario.gap_max_pct, size=len(g_indices)).tolist()
         _apply_gaps(out, g_indices, g_pcts, scenario.direction, rng)
+        # After gap events close prices are uncertain (post-gap settlement noise);
+        # spread that uncertainty across the whole series so MC paths diverge
+        noise = (scenario.gap_min_pct + scenario.gap_max_pct) / 2 * 0.25 * severity
+        if noise > 0:
+            _apply_chop(out, 0, n, noise, rng, mean_revert=False)
 
     elif sname == "trend_reversal":
         # Pump then reversal — reversal persists below the original start price
