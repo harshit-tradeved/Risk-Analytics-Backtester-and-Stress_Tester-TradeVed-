@@ -17,6 +17,7 @@ Indian symbol auto-resolution examples:
 from __future__ import annotations
 
 import logging
+import os
 import time
 from datetime import datetime, timedelta
 from typing import Literal, Optional
@@ -108,7 +109,11 @@ def _base_currency(symbol: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class BinanceFetcher:
-    BASE_URL = "https://api.binance.com"
+    # api.binance.com is geo-blocked (HTTP 451) from many datacenter IPs (e.g. cloud
+    # hosts). data-api.binance.vision is Binance's public market-data mirror — same
+    # /api/v3/klines contract, no geo-restriction. Override via BINANCE_BASE_URL in
+    # production (Railway/cloud); local dev keeps the default.
+    BASE_URL = os.getenv("BINANCE_BASE_URL", "https://api.binance.com")
     MAX_CANDLES_PER_REQUEST = 1000
 
     def fetch(
