@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Sidebar          from './components/Sidebar';
 import MetricsGrid      from './components/MetricsGrid';
 import ChartsPanel      from './components/ChartsPanel';
@@ -6,10 +6,14 @@ import TradeLog         from './components/TradeLog';
 import RegimeBreakdown  from './components/RegimeBreakdown';
 import ValidationPanel  from './components/ValidationPanel';
 import StressPage       from './components/StressPage';
+import IdentityGate     from './components/IdentityGate';
+import FeedbackWidget   from './components/FeedbackWidget';
+import AdminDashboard   from './components/AdminDashboard';
 import { FormState, BacktestResponse } from './types';
-import { runBacktest, isIndianSource } from './api';
+import { runBacktest, isIndianSource, validateAdminToken } from './api';
+import { getIdentity, getAdminToken, setAdminToken, track, trackPageView } from './analytics';
 
-type Page = 'backtest' | 'stress';
+type Page = 'backtest' | 'stress' | 'admin';
 
 const today = new Date();
 const fmt   = (d: Date) => d.toISOString().split('T')[0];
@@ -60,12 +64,45 @@ type Status   = 'idle' | 'loading' | 'success' | 'error';
 type MainTab  = 'charts' | 'trades' | 'report' | 'validation';
 
 export default function App() {
-  const [page,     setPage]     = useState<Page>('backtest');
-  const [form,     setForm]     = useState<FormState>(DEFAULT_FORM);
-  const [status,   setStatus]   = useState<Status>('idle');
-  const [result,   setResult]   = useState<BacktestResponse | null>(null);
-  const [errorMsg, setErrorMsg] = useState('');
-  const [tab,      setTab]      = useState<MainTab>('charts');
+  const [page,       setPage]       = useState<Page>('backtest');
+  const [form,       setForm]       = useState<FormState>(DEFAULT_FORM);
+  const [status,     setStatus]     = useState<Status>('idle');
+  const [result,     setResult]     = useState<BacktestResponse | null>(null);
+  const [errorMsg,   setErrorMsg]   = useState('');
+  const [tab,        setTab]        = useState<MainTab>('charts');
+  const [identified, setIdentified] = useState(() => !!getIdentity().name);
+  const [adminToken, setAdminTokenState] = useState<string | null>(null);
+
+  // Validate admin token on mount — strip it from URL immediately so it's never shareable
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const urlToken = params.get('admin');
+    const candidate = urlToken ?? getAdminToken();
+
+    if (urlToken) {
+      // Remove ?admin= from URL right away — token must not persist in address bar
+      const clean = new URL(window.location.href);
+      clean.searchParams.delete('admin');
+      window.history.replaceState({}, '', clean.toString());
+    }
+
+    if (!candidate) return;
+
+    validateAdminToken(candidate).then(valid => {
+      if (valid) {
+        setAdminToken(candidate);
+        setAdminTokenState(candidate);
+      } else {
+        // Bad token — clear it from storage too
+        localStorage.removeItem('tv_admin_token');
+      }
+    });
+  }, []);
+
+  // Track page changes
+  useEffect(() => {
+    if (identified) trackPageView(page);
+  }, [page, identified]);
 
   const updateForm = (updates: Partial<FormState>) =>
     setForm(prev => ({ ...prev, ...updates }));
@@ -80,23 +117,35 @@ export default function App() {
     if (form.strategy === 'GRID' && form.lowerBound >= form.upperBound) {
       setErrorMsg('GRID: Lower bound must be less than Upper bound.'); setStatus('error'); return;
     }
+    const symbol = form.symbol === '__custom__' ? form.customSymbol : form.symbol;
+    track('run_backtest', { symbol, strategy: form.strategy, capital: form.capital, source: form.source, interval: form.interval }, 'action', 'backtest');
     setStatus('loading'); setErrorMsg('');
     try {
       const data = await runBacktest(form);
       setResult(data);
       setStatus('success');
       setTab('charts');
+      track('backtest_success', { symbol, strategy: form.strategy, return_pct: data.results?.total_return_pct }, 'action', 'backtest');
     } catch (err: any) {
       setErrorMsg(err.message || 'Unknown error from API');
       setStatus('error');
+      track('backtest_error', { symbol, strategy: form.strategy, error: err.message }, 'error', 'backtest');
     }
   };
 
   const symbol   = form.symbol === '__custom__' ? form.customSymbol : form.symbol;
   const currency = result?.currency ?? (isIndianSource(form.source) ? '₹' : '$');
 
+  const { name: userName } = getIdentity();
+  const initials = userName ? userName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase() : 'HK';
+
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--tv-bg)] font-sans flex-col">
+
+      {/* ── Identity gate (first visit) ─────────────────────────────────── */}
+      {!identified && (
+        <IdentityGate onIdentified={() => setIdentified(true)} />
+      )}
 
       {/* ── Top Navigation Bar ──────────────────────────────────────────── */}
       <div className="flex-shrink-0 bg-[var(--tv-bg)]/95 backdrop-blur-md z-20 px-6 py-3 flex items-center justify-between border-b border-[var(--tv-border)]">
@@ -115,10 +164,11 @@ export default function App() {
         {/* Page pills */}
         <div className="flex gap-1 bg-gray-100 rounded-full p-1">
           {([
-            { key: 'backtest', label: '📈 Backtest' },
+            { key: 'backtest', label: '📈 Backtest'   },
             { key: 'stress',   label: '🧪 Stress Test' },
+            ...(adminToken ? [{ key: 'admin', label: '🔒 Admin' }] : []),
           ] as { key: Page; label: string }[]).map(p => (
-            <button key={p.key} onClick={() => setPage(p.key)}
+            <button key={p.key} onClick={() => { setPage(p.key); track('switch_page', { to: p.key }, 'action', page); }}
               className={`px-5 py-1.5 rounded-full text-sm font-semibold transition-all ${
                 page === p.key
                   ? 'bg-white text-[var(--tv-accent)] shadow-sm'
@@ -130,13 +180,20 @@ export default function App() {
 
         {/* Right icons */}
         <div className="flex items-center gap-2">
-          <button className="w-9 h-9 flex items-center justify-center bg-[var(--tv-s1)] rounded-full shadow-sm border border-gray-100 text-gray-500 hover:bg-gray-50">ℹ️</button>
-          <button className="w-9 h-9 flex items-center justify-center bg-[var(--tv-accent)] rounded-full shadow-sm text-white font-bold text-sm">HK</button>
+          <button
+            title="Send feedback"
+            onClick={() => track('feedback_nav_click', {}, 'action', page)}
+            className="w-9 h-9 flex items-center justify-center bg-[var(--tv-s1)] rounded-full shadow-sm border border-gray-100 text-gray-500 hover:bg-gray-50">💬</button>
+          <button className="w-9 h-9 flex items-center justify-center bg-[var(--tv-accent)] rounded-full shadow-sm text-white font-bold text-sm" title={userName ?? ''}>{initials}</button>
         </div>
       </div>
 
       {/* ── Page content ────────────────────────────────────────────────── */}
-      {page === 'stress' ? (
+      {page === 'admin' && adminToken ? (
+        <div className="flex-1 overflow-y-auto">
+          <AdminDashboard token={adminToken} />
+        </div>
+      ) : page === 'stress' ? (
         <div className="flex-1 overflow-hidden">
           <StressPage />
         </div>
@@ -173,7 +230,7 @@ export default function App() {
             </div>
             {status === 'success' && result && (
               <a
-                href={`http://localhost:8000${result.report_url}`}
+                href={`${import.meta.env.VITE_API_BASE_URL ?? ''}${result.report_url}`}
                 target="_blank" rel="noreferrer"
                 className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-semibold transition-all bg-white shadow-sm border border-gray-100 text-[var(--tv-text)] hover:shadow-md hover:-translate-y-0.5">
                 📄 View HTML Report ↗
@@ -269,6 +326,14 @@ export default function App() {
         </div>
       </main>
       </div>
+      )}
+
+      {/* ── Feedback widget (floating, always visible once identified) ── */}
+      {identified && (
+        <FeedbackWidget
+          page={page}
+          context={{ symbol: form.symbol === '__custom__' ? form.customSymbol : form.symbol, strategy: form.strategy }}
+        />
       )}
     </div>
   );
