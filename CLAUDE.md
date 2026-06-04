@@ -6,7 +6,7 @@ Auto-loaded by Claude Code every session. Keep it accurate; update when architec
 
 ## Project Overview
 
-**TradeVed Backtester** — a full-stack quantitative backtesting platform for crypto, US stocks, and Indian markets (NSE/BSE). Includes a full **Stress Tester** with 13 scenario presets, SSE-streamed Monte Carlo simulation, canvas-based live spaghetti chart, and delta-view toggle.
+**TradeVed Backtester** — a full-stack quantitative backtesting platform for crypto, US stocks, and Indian markets (NSE/BSE). Includes a full **Stress Tester** with 17 scenario presets (13 global + 4 Indian-specific), SSE-streamed Monte Carlo simulation, canvas-based live spaghetti chart, and delta-view toggle.
 
 - **Backend:** FastAPI + SQLite + Python 3.11+
 - **Frontend:** React 18 + Vite + TypeScript + Tailwind CSS
@@ -101,7 +101,7 @@ backtester/
 │   ├── cost_models.py         # IndianCostModel (Budget 2024), SimpleCostModel
 │   ├── metrics.py             # Sharpe, Sortino, Calmar, MDD, Profit Factor
 │   ├── regimes.py             # Timeframe-aware regime detection (bull/bear/sideways)
-│   └── stress.py              # Stress engine: 13 scenarios, apply_stress(), run_stress_backtest(),
+│   └── stress.py              # Stress engine: 17 scenarios, apply_stress(), run_stress_backtest(),
 │                              #   aggregate_stress_results(), run_single_backtest alias
 │
 ├── frontend/
@@ -194,7 +194,7 @@ backtester/
 ### Stress Tester (`engine/stress.py`)
 - **`apply_stress(df, scenario, severity, seed)`** — pure function, deep-copies input, returns perturbed OHLCV DataFrame. Never mutates input.
 - **`_apply_drift(..., persist=True/False)`** — `persist=True` means prices from `end` onwards are also scaled by the final multiplier (no snap-back). Used for all "permanent" crash scenarios.
-- **13 presets** in `SCENARIO_PRESETS` dict. Key presets with `persist=True`:
+- **17 presets** in `SCENARIO_PRESETS` dict (13 global + 4 Indian: `demonetization_2016`, `covid_nifty_mar2020`, `yes_bank_2020`, `expiry_gamma_squeeze`). Key presets with `persist=True`:
   - `luna_collapse` (95% crash, no recovery), `slow_bleed` (40% over 180d), `gfc_2008` (37% over 252d with bounces), `pump_dump` (dump persists), `trend_reversal` (reversal persists), `covid_crash` (crash + recovery both persist)
 - **`run_stress_backtest()`** returns: `scenario`, `baseline`, `stressed`, `monte_carlo`, `series`
   - `stressed` includes: `return_pct`, `sharpe`, `sortino`, `calmar`, `max_dd_pct`, `win_rate`, `num_trades`, `final_equity`, `annualized_return`
@@ -206,7 +206,7 @@ backtester/
 - **Three endpoints:**
   - `POST /api/stress/run` — sync, returns full result in one shot
   - `POST /api/stress/stream` — **async SSE**, yields events per run (`baseline` → `run` × N → `complete`)
-  - `GET /api/stress/scenarios` — returns all 13 preset metadata
+  - `GET /api/stress/scenarios` — returns all 17 preset metadata
 
 ### SSE Streaming (`POST /api/stress/stream`)
 - Implemented as an `async def` FastAPI route returning `StreamingResponse(media_type="text/event-stream")`

@@ -39,3 +39,9 @@ qa_reportscore_run_log.txt
 frontend/test-results/
 frontend/tests/
 frontend/playwright.config.ts
+.playwright-mcp/
+
+# Test/verification screenshots
+*.png
+*.jpeg
+*.jpg

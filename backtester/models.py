@@ -147,3 +147,42 @@ class Trade(Base):
             "fees":        self.fees,
             "side":        self.side,
         }
+
+
+class AnalyticsEvent(Base):
+    """User interaction events for usage tracking."""
+    __tablename__ = "analytics_events"
+    __table_args__ = (
+        Index("ix_analytics_created", "created_at"),
+        Index("ix_analytics_session", "session_id"),
+    )
+
+    id         = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String(36), nullable=False)
+    user_name  = Column(String(100))
+    user_email = Column(String(200))
+    event_type = Column(String(20), nullable=False)   # page_view | action | error | api
+    event_name = Column(String(100), nullable=False)
+    page       = Column(String(50))
+    props      = Column(Text)                          # JSON-encoded extra properties
+    user_agent = Column(String(500))
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Feedback(Base):
+    """In-app feedback submitted by testers."""
+    __tablename__ = "feedback"
+    __table_args__ = (
+        Index("ix_feedback_created", "created_at"),
+    )
+
+    id         = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String(36), nullable=False)
+    user_name  = Column(String(100))
+    user_email = Column(String(200))
+    category   = Column(String(20), nullable=False)   # bug | idea | praise | other
+    rating     = Column(Integer)                       # 1–5, nullable
+    message    = Column(Text, nullable=False)
+    page       = Column(String(50))
+    context    = Column(Text)                          # JSON: symbol, strategy, backtest_id, etc.
+    created_at = Column(DateTime, default=datetime.utcnow)

@@ -382,3 +382,39 @@ export interface FormState {
   wfWindow:       number;   // walk-forward train window in candles (default 252)
   wfStep:         number;   // walk-forward step/test size in candles (default 63)
 }
+
+// ── Admin / Analytics types ──────────────────────────────────────────────────
+
+export interface AdminSummary {
+  total_events:    number;
+  unique_sessions: number;
+  unique_users:    number;
+  total_feedback:  number;
+  top_events:      { name: string; count: number }[];
+  users:           { name: string | null; email: string; event_count: number; last_seen: string }[];
+  feedback_by_category: { category: string; count: number }[];
+}
+
+export interface AdminEvent {
+  id:         number;
+  session_id: string;
+  user_name:  string | null;
+  user_email: string | null;
+  event_type: string;
+  event_name: string;
+  page:       string | null;
+  props:      Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface AdminFeedback {
+  id:         number;
+  user_name:  string | null;
+  user_email: string | null;
+  category:   string;
+  rating:     number | null;
+  message:    string;
+  page:       string | null;
+  context:    Record<string, unknown> | null;
+  created_at: string;
+}

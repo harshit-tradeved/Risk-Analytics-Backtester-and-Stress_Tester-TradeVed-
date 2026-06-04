@@ -1,4 +1,6 @@
-import { BacktestResponse, FormState, StressFormState, StressResponse } from './types';
+import { AdminEvent, AdminFeedback, AdminSummary, BacktestResponse, FormState, StressFormState, StressResponse } from './types';
+
+const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? '';
 
 /** Returns true for NSE / BSE sources */
 export const isIndianSource = (source: string) => source === 'nse' || source === 'bse';
@@ -65,7 +67,7 @@ export async function runBacktest(form: FormState): Promise<BacktestResponse> {
     wf_step:          form.wfStep,
   };
 
-  const res = await fetch('/api/backtest/run', {
+  const res = await fetch(`${API_BASE}/api/backtest/run`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify(payload),
@@ -92,7 +94,7 @@ export async function fetchGridBounds(
   endDate: string,
 ) {
   const q = new URLSearchParams({ symbol, source, interval, start_date: startDate, end_date: endDate });
-  const res = await fetch(`/api/strategies/grid/bounds?${q}`);
+  const res = await fetch(`${API_BASE}/api/strategies/grid/bounds?${q}`);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error((err as any).detail ?? `Server ${res.status}`);
@@ -140,7 +142,7 @@ export async function runStressTest(form: StressFormState): Promise<StressRespon
   if (form.volMultiplier     != null) payload.vol_multiplier      = form.volMultiplier;
   if (form.seed              != null) payload.seed                = form.seed;
 
-  const res = await fetch('/api/stress/run', {
+  const res = await fetch(`${API_BASE}/api/stress/run`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify(payload),
@@ -226,7 +228,7 @@ export function streamStressTest(
 
   (async () => {
     try {
-      const res = await fetch('/api/stress/stream', {
+      const res = await fetch(`${API_BASE}/api/stress/stream`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify(payload),
@@ -290,7 +292,7 @@ export async function fetchStressScenarios(): Promise<Record<string, {
   direction: string;
   has_outliers: boolean;
 }>> {
-  const res = await fetch('/api/stress/scenarios');
+  const res = await fetch(`${API_BASE}/api/stress/scenarios`);
   if (!res.ok) throw new Error(`Server ${res.status}`);
   return res.json();
 }
@@ -308,7 +310,97 @@ export async function fetchIndianCostPreview(
     brokerage_flat:  String(brokerageFlat),
     turnover:        String(turnover),
   });
-  const res = await fetch(`/api/india/cost_preview?${q}`);
+  const res = await fetch(`${API_BASE}/api/india/cost_preview?${q}`);
+  if (!res.ok) throw new Error(`Server ${res.status}`);
+  return res.json();
+}
+
+// ── Analytics & Feedback ─────────────────────────────────────────────────────
+
+export interface TrackEventPayload {
+  session_id: string;
+  user_name?: string;
+  user_email?: string;
+  event_type: string;
+  event_name: string;
+  page?: string;
+  props?: Record<string, unknown>;
+  user_agent?: string;
+}
+
+export async function trackEvents(events: TrackEventPayload[]): Promise<void> {
+  try {
+    await fetch(`${API_BASE}/api/track`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ events }),
+    });
+  } catch { /* never let tracking errors surface */ }
+}
+
+export interface FeedbackPayload {
+  session_id: string;
+  user_name?:  string;
+  user_email?: string;
+  category:    string;
+  rating?:     number;
+  message:     string;
+  page?:       string;
+  context?:    Record<string, unknown>;
+}
+
+export async function submitFeedback(payload: FeedbackPayload): Promise<{ ok: boolean; id: number }> {
+  const res = await fetch(`${API_BASE}/api/feedback`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`Server ${res.status}`);
+  return res.json();
+}
+
+export async function validateAdminToken(token: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/ping`, {
+      headers: { 'X-Admin-Token': token },
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function fetchAdminSummary(token: string): Promise<AdminSummary> {
+  const res = await fetch(`${API_BASE}/api/admin/summary`, {
+    headers: { 'X-Admin-Token': token },
+  });
+  if (res.status === 401) throw new Error('Unauthorized');
+  if (!res.ok) throw new Error(`Server ${res.status}`);
+  return res.json();
+}
+
+export async function fetchAdminEvents(
+  token: string,
+  params?: { limit?: number; offset?: number; user?: string; type?: string },
+): Promise<AdminEvent[]> {
+  const q = new URLSearchParams();
+  if (params?.limit)  q.set('limit',  String(params.limit));
+  if (params?.offset) q.set('offset', String(params.offset));
+  if (params?.user)   q.set('user',   params.user);
+  if (params?.type)   q.set('type',   params.type);
+  const res = await fetch(`${API_BASE}/api/admin/events?${q}`, {
+    headers: { 'X-Admin-Token': token },
+  });
+  if (res.status === 401) throw new Error('Unauthorized');
+  if (!res.ok) throw new Error(`Server ${res.status}`);
+  return res.json();
+}
+
+export async function fetchAdminFeedback(token: string): Promise<AdminFeedback[]> {
+  const res = await fetch(`${API_BASE}/api/admin/feedback`, {
+    headers: { 'X-Admin-Token': token },
+  });
+  if (res.status === 401) throw new Error('Unauthorized');
   if (!res.ok) throw new Error(`Server ${res.status}`);
   return res.json();
 }

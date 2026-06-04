@@ -7,7 +7,7 @@ post-hoc equity adjustments.
 
 Public API
 ----------
-SCENARIO_PRESETS  : dict[str, StressScenario]  — 13 named presets
+SCENARIO_PRESETS  : dict[str, StressScenario]  — 17 named presets (13 global + 4 Indian-specific)
 apply_stress()    : pure function, returns a perturbed DataFrame copy
 run_stress_backtest() : runs baseline + N perturbed backtests, aggregates results
 """

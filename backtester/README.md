@@ -42,7 +42,7 @@ npm run dev -- --port 5173
 - **GRID auto-bounds:** Auto-detects price range when bounds are left at 0
 
 ### Stress Tester
-- **13 scenario presets:** GFC 2008, COVID crash, LUNA collapse, slow bleed, pump & dump, and more
+- **17 scenario presets:** GFC 2008, COVID crash, LUNA collapse, slow bleed, pump & dump, and more
 - **SSE streaming:** Live Monte Carlo paths building up in real time on a canvas chart
 - **Monte Carlo:** 100+ runs with magnitude jitter (`severity × uniform(0.75, 1.25)`) per run
 - **Delta mode:** Toggle between absolute equity and % impact vs baseline
@@ -78,7 +78,7 @@ backtester/
 │   ├── cost_models.py         # IndianCostModel (Budget 2024), SimpleCostModel
 │   ├── metrics.py             # Sharpe, Sortino, Calmar, MDD, Profit Factor
 │   ├── regimes.py             # Timeframe-aware regime detection
-│   ├── stress.py              # Stress engine: 13 scenarios, Monte Carlo
+│   ├── stress.py              # Stress engine: 17 scenarios, Monte Carlo
 │   └── validation.py          # Walk-forward / train-test split engine
 │
 ├── frontend/
@@ -119,7 +119,7 @@ GET  /api/india/cost_preview    — preview Indian transaction costs
 ```
 POST /api/stress/run            — sync stress test (all MC runs at once)
 POST /api/stress/stream         — SSE streaming stress test (paths in real time)
-GET  /api/stress/scenarios      — list all 13 scenario presets
+GET  /api/stress/scenarios      — list all 17 scenario presets
 ```
 
 ### Data
