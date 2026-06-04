@@ -1699,11 +1699,12 @@ def admin_feedback(
 # ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    import os
     import uvicorn
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=8000,
+        port=int(os.getenv("PORT", "8000")),  # Railway/Render inject $PORT; default 8000 locally
         reload=False,   # reload=True caused constant restarts: logs/backtester.log
                         # and optimizer_results/ writes triggered watchfiles every 400ms,
                         # freezing the event loop. Restart the server manually after code changes.
