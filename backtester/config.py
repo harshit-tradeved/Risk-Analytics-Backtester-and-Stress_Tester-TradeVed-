@@ -27,7 +27,10 @@ for _d in [DATA_STORAGE_DIR, REPORTS_DIR, CHARTS_DIR, LOGS_DIR]:
     _d.mkdir(exist_ok=True)
 
 # ── Database ─────────────────────────────────────────────────────────────────
-DATABASE_URL = f"sqlite:///{BASE_DIR / 'backtester.db'}"
+DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR / 'backtester.db'}")
+
+# ── Admin auth (set ADMIN_TOKEN env var in production) ───────────────────────
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "dev-admin-token-change-in-prod")
 
 # ── API Settings ─────────────────────────────────────────────────────────────
 API_TITLE       = "TradeVed Backtester API"

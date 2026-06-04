@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import pandas as pd
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session
 
 import models
 from config import (
+    ADMIN_TOKEN,
     API_DESCRIPTION, API_PREFIX, API_TITLE, API_VERSION,
     DEFAULT_CAPITAL, DEFAULT_FEE_PERCENT, DEFAULT_SLIPPAGE_PERCENT,
     RATE_LIMIT_PER_MINUTE, REPORTS_DIR,
@@ -118,6 +119,42 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def _api_tracking_middleware(request: Request, call_next):
+    """Log every API call as an analytics event (skips /api/track and /api/admin/*)."""
+    import time
+    start = time.monotonic()
+    response = await call_next(request)
+    path = request.url.path
+    # Skip tracking endpoints themselves to prevent recursion/noise
+    if path.startswith(f"{API_PREFIX}/track") or path.startswith(f"{API_PREFIX}/admin"):
+        return response
+    if not path.startswith(API_PREFIX):
+        return response
+    duration_ms = int((time.monotonic() - start) * 1000)
+    try:
+        from database import SessionLocal
+        db = SessionLocal()
+        try:
+            db.add(models.AnalyticsEvent(
+                session_id = request.headers.get("X-Session-Id", "server"),
+                user_name  = request.headers.get("X-User-Name"),
+                user_email = request.headers.get("X-User-Email"),
+                event_type = "api",
+                event_name = f"{request.method} {path}",
+                page       = path,
+                props      = json.dumps({"status": response.status_code, "duration_ms": duration_ms}),
+                user_agent = request.headers.get("user-agent", "")[:500],
+            ))
+            db.commit()
+        finally:
+            db.close()
+    except Exception:
+        pass  # never let tracking crash a real request
+    return response
+
+
 # ── Singletons ─────────────────────────────────────────────────────────────────
 fetcher   = DataFetcher()
 validator = DataValidator()
@@ -176,6 +213,37 @@ class OptimizeRequest(BaseModel):
     source:       str   = "binance"
     param_ranges: dict[str, list]  # {"num_levels": [3,5,7], "upper_bound": [45000]}
     metric:       str   = "sharpe_ratio"  # metric to maximise
+
+
+class TrackEventItem(BaseModel):
+    session_id: str
+    user_name:  Optional[str] = None
+    user_email: Optional[str] = None
+    event_type: str = "action"
+    event_name: str
+    page:       Optional[str] = None
+    props:      Optional[dict] = None
+    user_agent: Optional[str] = None
+
+
+class TrackRequest(BaseModel):
+    events: list[TrackEventItem]
+
+
+class FeedbackRequest(BaseModel):
+    session_id: str
+    user_name:  Optional[str] = None
+    user_email: Optional[str] = None
+    category:   str
+    rating:     Optional[int] = None
+    message:    str
+    page:       Optional[str] = None
+    context:    Optional[dict] = None
+
+
+def _require_admin(x_admin_token: Optional[str] = Header(None)):
+    if x_admin_token != ADMIN_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid or missing admin token")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1461,6 +1529,169 @@ async def stream_stress_sse(req: StressRequest, db: Session = Depends(get_db)):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ── Analytics & Feedback
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.post(f"{API_PREFIX}/track", tags=["Analytics"])
+def track_events(req: TrackRequest, db: Session = Depends(get_db)):
+    """Batch-insert frontend analytics events."""
+    try:
+        for ev in req.events:
+            db.add(models.AnalyticsEvent(
+                session_id = ev.session_id,
+                user_name  = ev.user_name,
+                user_email = ev.user_email,
+                event_type = ev.event_type,
+                event_name = ev.event_name,
+                page       = ev.page,
+                props      = json.dumps(ev.props) if ev.props else None,
+                user_agent = (ev.user_agent or "")[:500],
+            ))
+        db.commit()
+        return {"ok": True, "count": len(req.events)}
+    except Exception as exc:
+        logger.warning("Analytics insert failed: %s", exc)
+        return {"ok": False, "count": 0}
+
+
+@app.post(f"{API_PREFIX}/feedback", tags=["Analytics"])
+def submit_feedback(req: FeedbackRequest, db: Session = Depends(get_db)):
+    """Submit in-app feedback from a tester."""
+    row = models.Feedback(
+        session_id = req.session_id,
+        user_name  = req.user_name,
+        user_email = req.user_email,
+        category   = req.category,
+        rating     = req.rating,
+        message    = req.message,
+        page       = req.page,
+        context    = json.dumps(req.context) if req.context else None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {"ok": True, "id": row.id}
+
+
+@app.get(f"{API_PREFIX}/admin/ping", tags=["Admin"])
+def admin_ping(_: None = Depends(_require_admin)):
+    """Lightweight token validation — returns 200 if token is valid, 401 otherwise."""
+    return {"ok": True}
+
+
+@app.get(f"{API_PREFIX}/admin/summary", tags=["Admin"])
+def admin_summary(db: Session = Depends(get_db), _: None = Depends(_require_admin)):
+    """Aggregate stats: total events, unique users, event breakdown, feedback count."""
+    from sqlalchemy import func, distinct
+
+    total_events = db.query(func.count(models.AnalyticsEvent.id)).scalar() or 0
+    unique_sessions = db.query(func.count(distinct(models.AnalyticsEvent.session_id))).scalar() or 0
+    unique_users = db.query(func.count(distinct(models.AnalyticsEvent.user_email))).filter(
+        models.AnalyticsEvent.user_email.isnot(None)
+    ).scalar() or 0
+    total_feedback = db.query(func.count(models.Feedback.id)).scalar() or 0
+
+    # Events grouped by name (top actions)
+    event_counts = db.query(
+        models.AnalyticsEvent.event_name,
+        func.count(models.AnalyticsEvent.id).label("count"),
+    ).group_by(models.AnalyticsEvent.event_name).order_by(func.count(models.AnalyticsEvent.id).desc()).limit(20).all()
+
+    # Per-user summary
+    user_rows = db.query(
+        models.AnalyticsEvent.user_name,
+        models.AnalyticsEvent.user_email,
+        func.count(models.AnalyticsEvent.id).label("event_count"),
+        func.max(models.AnalyticsEvent.created_at).label("last_seen"),
+    ).filter(models.AnalyticsEvent.user_email.isnot(None)).group_by(
+        models.AnalyticsEvent.user_email
+    ).order_by(func.max(models.AnalyticsEvent.created_at).desc()).all()
+
+    # Feedback by category
+    fb_cats = db.query(
+        models.Feedback.category,
+        func.count(models.Feedback.id).label("count"),
+    ).group_by(models.Feedback.category).all()
+
+    return {
+        "total_events":    total_events,
+        "unique_sessions": unique_sessions,
+        "unique_users":    unique_users,
+        "total_feedback":  total_feedback,
+        "top_events":      [{"name": r.event_name, "count": r.count} for r in event_counts],
+        "users":           [
+            {
+                "name":        r.user_name,
+                "email":       r.user_email,
+                "event_count": r.event_count,
+                "last_seen":   r.last_seen.isoformat() if r.last_seen else None,
+            }
+            for r in user_rows
+        ],
+        "feedback_by_category": [{"category": r.category, "count": r.count} for r in fb_cats],
+    }
+
+
+@app.get(f"{API_PREFIX}/admin/events", tags=["Admin"])
+def admin_events(
+    limit:  int           = Query(100, le=500),
+    offset: int           = Query(0, ge=0),
+    user:   Optional[str] = Query(None, description="Filter by user email"),
+    type_:  Optional[str] = Query(None, alias="type", description="Filter by event_type"),
+    db: Session = Depends(get_db),
+    _: None = Depends(_require_admin),
+):
+    """Recent analytics events, newest first, with optional filters."""
+    q = db.query(models.AnalyticsEvent)
+    if user:
+        q = q.filter(models.AnalyticsEvent.user_email == user)
+    if type_:
+        q = q.filter(models.AnalyticsEvent.event_type == type_)
+    rows = q.order_by(models.AnalyticsEvent.created_at.desc()).offset(offset).limit(limit).all()
+    return [
+        {
+            "id":         r.id,
+            "session_id": r.session_id,
+            "user_name":  r.user_name,
+            "user_email": r.user_email,
+            "event_type": r.event_type,
+            "event_name": r.event_name,
+            "page":       r.page,
+            "props":      json.loads(r.props) if r.props else None,
+            "created_at": r.created_at.isoformat(),
+        }
+        for r in rows
+    ]
+
+
+@app.get(f"{API_PREFIX}/admin/feedback", tags=["Admin"])
+def admin_feedback(
+    limit:  int = Query(100, le=500),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    _: None = Depends(_require_admin),
+):
+    """All feedback rows, newest first."""
+    rows = db.query(models.Feedback).order_by(
+        models.Feedback.created_at.desc()
+    ).offset(offset).limit(limit).all()
+    return [
+        {
+            "id":         r.id,
+            "user_name":  r.user_name,
+            "user_email": r.user_email,
+            "category":   r.category,
+            "rating":     r.rating,
+            "message":    r.message,
+            "page":       r.page,
+            "context":    json.loads(r.context) if r.context else None,
+            "created_at": r.created_at.isoformat(),
+        }
+        for r in rows
+    ]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
