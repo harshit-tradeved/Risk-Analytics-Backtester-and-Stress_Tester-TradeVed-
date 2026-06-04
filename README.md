@@ -22,7 +22,7 @@ Full-stack quantitative backtesting and stress-testing platform for **crypto**, 
 - **GRID auto-bounds** — Detects price range automatically when bounds are left at 0
 
 ### Stress Tester
-- **13 scenario presets** — GFC 2008, COVID crash, LUNA collapse, slow bleed, pump & dump, and more
+- **17 scenario presets** — 13 global (GFC 2008, COVID crash, LUNA collapse, slow bleed, pump & dump…) + 4 Indian-specific (Demonetization 2016, COVID NIFTY, Yes Bank Collapse, F&O Expiry Gamma Squeeze)
 - **SSE streaming** — Live Monte Carlo paths building up in real time on a canvas chart
 - **Monte Carlo** — 100+ runs with per-run magnitude jitter (`severity × uniform(0.75, 1.25)`)
 - **Delta mode** — Toggle between absolute equity and % impact vs baseline
@@ -263,21 +263,27 @@ Key F&O lot sizes: NIFTY50 = 50, BANKNIFTY = 15, FINNIFTY = 40, SENSEX = 10.
 
 ## Stress Scenarios
 
-| Scenario | Description |
-|----------|-------------|
-| `luna_collapse` | 95% crash, no recovery |
-| `slow_bleed` | 40% drift down over 180 days |
-| `gfc_2008` | 37% crash over 252 days with partial bounces |
-| `covid_crash` | Sharp crash followed by recovery |
-| `pump_dump` | 3× pump then 80% dump |
-| `vol_spike` | Volatility surge, prices unchanged |
-| `flash_crash` | Single-day 30% drop |
-| `trend_reversal` | Bull-to-bear regime change |
-| `liquidity_crisis` | Wide bid/ask + gap risk |
-| `bear_market` | Steady 50% decline over 365 days |
-| `sideways_chop` | High vol, zero trend |
-| `gap_risk` | Overnight gap events |
-| `rate_shock` | Interest rate shock scenario |
+17 presets total — 13 global + 4 Indian-market specific.
+
+| Key | Display Name | What it simulates |
+|-----|-------------|-------------------|
+| `gfc_2008` | 2008 GFC Replay | 37% crash over 252 days with 2 partial bounces |
+| `covid_crash` | 2020 COVID Flash Crash | 34% crash in 30 days, 60% recovery over 45 days |
+| `flash_crash_2010` | 2010 Flash Crash | 9% single-day drop + outlier wick events |
+| `luna_collapse` | LUNA-style Collapse | 95% crash in 7 days, no recovery |
+| `liquidity_drought` | Liquidity Drought | Spread/slippage multipliers, no price drift |
+| `pump_dump` | Pump & Dump | 50% pump over 5 days then 60% dump |
+| `whipsaw_chop` | Whipsaw Chop | ±5% mean-reverting chop for 60 days |
+| `slow_bleed` | Slow Bleed Bear | 40% drift down over 180 days |
+| `vol_spike` | Vol Spike (VIX-style) | 3× volatility multiplier for 30 days |
+| `gap_risk` | Gap Risk | 10 random overnight gap events (3–8%) |
+| `range_bound` | Range-bound Consolidation | ±2% mean-reverting chop for 90 days |
+| `trend_reversal` | Trend Exhaustion + Reversal | 25% down then 30% recovery |
+| `outlier_injection` | 20-30% Outlier Injection | 5 random outlier candles (20–30%) |
+| `demonetization_2016` | India Demonetization 2016 | 15% drop over 30d + gap events (Indian markets) |
+| `covid_nifty_mar2020` | COVID NIFTY Crash Mar 2020 | 38% crash + 70% recovery + gap events (NSE) |
+| `yes_bank_2020` | Yes Bank Collapse 2020 | 85% drop over 120d + heavy gap events (NSE) |
+| `expiry_gamma_squeeze` | F&O Expiry Gamma Squeeze | 4× vol + gap + outlier events (F&O specific) |
 
 ---
 
