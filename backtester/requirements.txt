@@ -1,20 +1,36 @@
-# TradeVed Backtester - Dependencies
-fastapi>=0.104.0
-uvicorn[standard]>=0.24.0
-python-binance>=1.0.19
-pycoingecko>=3.1.0
-yfinance>=0.2.31
-pandas>=2.1.0
-numpy>=1.24.0
-plotly>=5.17.0
-sqlalchemy>=2.0.0
-pydantic>=2.4.0
-python-multipart>=0.0.6
-requests>=2.31.0
-scipy>=1.11.0
-aiohttp>=3.9.0
-slowapi>=0.1.9
-kaleido>=0.2.1
-tvdatafeed @ git+https://github.com/rongardF/tvdatafeed.git
-openchart>=1.1.0
-fyers-apiv3
+# TradeVed Backtester - Dependencies (pinned for reproducible deploys)
+
+# ── Web framework ──
+fastapi==0.136.3
+uvicorn[standard]==0.48.0
+python-multipart==0.0.29
+slowapi==0.1.9
+
+# ── Data / scientific stack ──
+pandas==3.0.3
+numpy==2.4.6
+scipy==1.17.1
+plotly==6.7.0
+kaleido==1.3.0
+
+# ── Persistence ──
+sqlalchemy==2.0.50
+pydantic==2.13.4
+
+# ── HTTP ──
+requests==2.31.0
+aiohttp==3.9.3
+
+# ── Market data sources ──
+python-binance==1.0.36
+pycoingecko==3.2.0
+yfinance==1.4.0
+fyers-apiv3==3.1.12
+
+# ── Optional NSE intraday data sources ──
+# Lazily imported in data/fetcher.py with graceful ImportError fallback — NOT
+# required for the core API (Binance / CoinGecko / yfinance cover all markets).
+# `openchart>=1.1.0` is not published for Linux, so it is omitted from deploys.
+# Re-install locally if you need these sources:
+#   openchart
+#   tvdatafeed @ git+https://github.com/rongardF/tvdatafeed.git
