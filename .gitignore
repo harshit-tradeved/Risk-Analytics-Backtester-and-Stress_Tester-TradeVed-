@@ -45,3 +45,8 @@ frontend/playwright.config.ts
 *.png
 *.jpeg
 *.jpg
+
+# Secrets / tokens (never commit)
+admin_token.txt
+*token*.txt
+*.secret
