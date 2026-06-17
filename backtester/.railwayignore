@@ -1,3 +1,8 @@
+# Python virtualenv — never upload
+venv/
+.venv/
+env/
+
 # Frontend React app — deployed separately on Vercel.
 # NOTE: keep frontend/*.py (charts.py, report.py, __init__.py) — main.py imports them.
 frontend/node_modules/
