@@ -13,6 +13,7 @@ import json
 import logging
 import math
 import os
+import random
 import uuid
 from copy import deepcopy
 from datetime import date, datetime
@@ -2032,8 +2033,8 @@ async def stream_crisis_sse(req: CrisisRequest):
         profitable_count = 0
 
         for i in range(n_paths_):
-            seed_i     = (req_snap.seed + i) if req_snap.seed is not None else i
-            run_sev    = sev * float(np.random.uniform(0.75, 1.25))
+            seed_i  = (req_snap.seed + i) if req_snap.seed is not None else i
+            run_sev = sev * (0.75 + random.random() * 0.5)
             try:
                 raw_path = await asyncio.to_thread(
                     _gen_one_path, df_snap, horizon_, 20, seed_i,
