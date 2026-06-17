@@ -3,7 +3,6 @@ import { ForecastFormState, ForecastResponse, ForecastCompareResult, RegimeDistr
 import ForwardTestSidebar, { DEFAULT_FORECAST_FORM } from './ForwardTestSidebar';
 import ForwardTestResults from './ForwardTestResults';
 import MCPathsCanvas, { MCRun } from './MCPathsCanvas';
-import CrisisFanChart from './CrisisFanChart';
 import PaperTradeView from './PaperTradeView';
 import { streamForwardTest, streamCrisisTest, compareForecastMethods, isIndianSource, StreamRun } from '../api';
 

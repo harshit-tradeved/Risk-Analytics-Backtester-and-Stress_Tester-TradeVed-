@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { ForecastResponse, ForecastCompareResult, RegimeDistribution } from '../types';
 import MCPathsCanvas, { MCRun } from './MCPathsCanvas';
-import CrisisFanChart, { CrisisFanRun } from './CrisisFanChart';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
