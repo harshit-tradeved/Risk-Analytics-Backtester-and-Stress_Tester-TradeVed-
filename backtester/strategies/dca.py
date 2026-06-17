@@ -20,13 +20,29 @@ from typing import Any
 
 import pandas as pd
 
-from strategies.base import BaseStrategy
+from strategies.base import BaseStrategy, Param
 
 logger = logging.getLogger(__name__)
 
 
 class DCAStrategy(BaseStrategy):
     """DCA strategy: regular interval buys with time-based or profit-target exit."""
+
+    CATEGORY = "classic"
+
+    @classmethod
+    def param_schema(cls) -> dict[str, Any]:
+        return {
+            "buy_interval_hours": Param("number", "Buy Interval (hours)", min=1, step=1, group="Schedule"),
+            "invest_per_buy_usd": Param("number", "Invest / Buy (USD)", min=0, step=50, group="Sizing",
+                                        help="Set 0 to use fixed units instead."),
+            "buy_quantity":       Param("number", "Units / Buy", min=0, step=0.001, group="Sizing",
+                                        depends_on={"field": "invest_per_buy_usd", "value": 0}),
+            "hold_days":          Param("number", "Hold Days", min=1, step=1, group="Schedule"),
+            "exit_type":          Param("select", "Exit Type", options=["time", "profit"], group="Exit"),
+            "profit_target_pct":  Param("number", "Profit Target %", min=0.1, step=0.5, group="Exit",
+                                        depends_on={"field": "exit_type", "value": "profit"}),
+        }
 
     @staticmethod
     def default_params() -> dict[str, Any]:

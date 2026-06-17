@@ -27,7 +27,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from strategies.base import BaseStrategy
+from strategies.base import BaseStrategy, Param
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,25 @@ def _ema(series: pd.Series, period: int) -> pd.Series:
 
 class PLAStrategy(BaseStrategy):
     """PLA strategy: EMA crossover entries with cascading position averaging."""
+
+    CATEGORY = "classic"
+
+    @classmethod
+    def param_schema(cls) -> dict[str, Any]:
+        return {
+            "fast_ema":             Param("number", "Fast EMA", min=2, max=200, step=1, group="Signal"),
+            "slow_ema":             Param("number", "Slow EMA", min=3, max=400, step=1, group="Signal"),
+            "entry_levels":         Param("array", "Entry Levels (% drop)", group="Entries",
+                                          help="Price-drop %% from signal for each cascading buy."),
+            "invest_per_level_usd": Param("array", "Invest / Level (USD)", group="Sizing"),
+            "entry_quantities":     Param("array", "Units / Level", group="Sizing"),
+            "exit_type":            Param("select", "Exit Type",
+                                          options=["crossover", "take_profit", "stop_loss"], group="Exit"),
+            "take_profit_pct":      Param("number", "Take Profit %", min=0.1, step=0.5, group="Exit",
+                                          depends_on={"field": "exit_type", "value": "take_profit"}),
+            "stop_loss_pct":        Param("number", "Stop Loss %", min=0.1, step=0.5, group="Exit",
+                                          depends_on={"field": "exit_type", "value": "stop_loss"}),
+        }
 
     @staticmethod
     def default_params() -> dict[str, Any]:

@@ -1,14 +1,19 @@
-import { useState } from 'react';
-import { FormState, Strategy, DataSource, Interval, MarketType, BrokerageModel } from '../types';
-import { fetchGridBounds, fetchIndianCostPreview } from '../api';
+import { useState, useEffect } from 'react';
+import { FormState, Strategy, DataSource, Interval, MarketType, BrokerageModel, StrategyMeta, CLASSIC_STRATEGIES } from '../types';
+import { fetchGridBounds, fetchIndianCostPreview, fetchStrategies } from '../api';
+import StrategyParamsForm, { defaultsFromSchema } from './StrategyParamsForm';
+import RuleBuilder, { defaultCustomParams } from './RuleBuilder';
 
+const CLASSIC_SET = new Set<string>(CLASSIC_STRATEGIES);
+
+// Must stay in sync with data/indian_assets.py:FO_LOT_SIZES (backend source of truth)
 const FO_LOT_SIZES: Record<string, number> = {
   NIFTY50:    50,   BANKNIFTY:  15,   FINNIFTY:   40,   SENSEX:     10,
   RELIANCE:   250,  HDFCBANK:   550,  TCS:        150,  INFY:       300,
-  SBIN:       1500, BAJFINANCE: 125,  TATAMOTORS: 900,  ICICIBANK:  700,
-  KOTAKBANK:  400,  AXISBANK:   1200, LT:         175,  SUNPHARMA:  350,
-  WIPRO:      1500, TITAN:      175,  MARUTI:     25,   BHARTIARTL: 500,
-  ZOMATO:     2000, IRCTC:      700,  HAL:        75,   HCLTECH:    350,
+  SBIN:       1500, BAJFINANCE: 125,  TATAMOTORS: 2400, ICICIBANK:  700,
+  KOTAKBANK:  400,  AXISBANK:   1200, LT:         300,  SUNPHARMA:  700,
+  WIPRO:      2800, TITAN:      375,  MARUTI:     75,   BHARTIARTL: 1000,
+  ZOMATO:     4500, IRCTC:      875,  HAL:        175,  HCLTECH:    700,
 };
 
 const APPROX_PRICES: Record<string, number> = {
@@ -286,6 +291,21 @@ export default function Sidebar({ form, onChange, onRun, loading }: SidebarProps
   const [costPreview, setCostPreview] = useState<any>(null);
   const [costErr, setCostErr] = useState('');
 
+  const [strategies, setStrategies] = useState<StrategyMeta[]>([]);
+  useEffect(() => { fetchStrategies().then(setStrategies).catch(() => {}); }, []);
+
+  const selectedMeta = strategies.find(s => s.name === form.strategy);
+
+  /** Switch strategy; for non-classic strategies seed strategyParams from schema. */
+  const handleStrategyChange = (name: string) => {
+    if (CLASSIC_SET.has(name)) { onChange({ strategy: name }); return; }
+    const meta = strategies.find(s => s.name === name);
+    const seed = name === 'CUSTOM'
+      ? defaultCustomParams()
+      : (meta ? defaultsFromSchema(meta.schema) : {});
+    onChange({ strategy: name, strategyParams: seed });
+  };
+
   const handleAutoDetect = async () => {
     try {
       setDetecting(true);
@@ -481,11 +501,51 @@ export default function Sidebar({ form, onChange, onRun, loading }: SidebarProps
       {/* Strategy Section */}
       <div className="mb-6 pb-4 border-b border-[var(--tv-border)]">
         <h3 className="text-xs font-semibold uppercase text-[var(--tv-muted)] mb-4">Strategy</h3>
-        <SelectRow label="Algorithm" value={form.strategy} field="strategy" options={[
-          {value: 'GRID', label: 'Grid Trading'},
-          {value: 'DCA', label: 'DCA'},
-          {value: 'PLA', label: 'Price Level Averaging (PLA)'}
-        ]} />
+        <div className="flex flex-col mb-3">
+          <label className="text-sm font-medium text-[var(--tv-text)] mb-1">Algorithm</label>
+          <select
+            className="w-full px-3 py-2 bg-[var(--tv-s2)] rounded-lg text-sm text-[var(--tv-text)] border-none outline-none focus:ring-2 focus:ring-[var(--tv-accent)]"
+            value={form.strategy}
+            onChange={e => handleStrategyChange(e.target.value)}
+          >
+            {strategies.length === 0 ? (
+              <>
+                <option value="GRID">Grid Trading</option>
+                <option value="DCA">DCA</option>
+                <option value="PLA">Price Level Averaging (PLA)</option>
+              </>
+            ) : (
+              ['classic', 'indicator', 'custom'].map(cat => {
+                const inCat = strategies.filter(s => s.category === cat);
+                if (!inCat.length) return null;
+                const label = cat === 'classic' ? 'Classic' : cat === 'indicator' ? 'Indicator' : 'Custom';
+                return (
+                  <optgroup key={cat} label={label}>
+                    {inCat.map(s => <option key={s.name} value={s.name}>{s.description || s.name}</option>)}
+                  </optgroup>
+                );
+              })
+            )}
+          </select>
+          {selectedMeta?.description && (
+            <p className="text-[10px] text-[var(--tv-muted)] mt-1">{selectedMeta.description}</p>
+          )}
+        </div>
+
+        {/* ── Schema-driven params for non-classic strategies ──────────────── */}
+        {form.strategy === 'CUSTOM' && (
+          <RuleBuilder
+            value={form.strategyParams}
+            onChange={next => onChange({ strategyParams: next })}
+          />
+        )}
+        {!CLASSIC_SET.has(form.strategy) && form.strategy !== 'CUSTOM' && selectedMeta && (
+          <StrategyParamsForm
+            schema={selectedMeta.schema}
+            value={form.strategyParams}
+            onChange={next => onChange({ strategyParams: next })}
+          />
+        )}
 
         {form.strategy === 'GRID' && (
           <div className="pl-2 border-l-2 border-[var(--tv-border)] space-y-3 mt-4">

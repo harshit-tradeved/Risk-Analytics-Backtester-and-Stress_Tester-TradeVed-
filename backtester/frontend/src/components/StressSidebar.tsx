@@ -1,5 +1,10 @@
-import React, { useState } from 'react';
-import { StressFormState, StressScenarioKey, Strategy, DataSource, Interval } from '../types';
+import React, { useState, useEffect } from 'react';
+import { StressFormState, StressScenarioKey, Strategy, DataSource, Interval, StrategyMeta, CLASSIC_STRATEGIES } from '../types';
+import { fetchStrategies } from '../api';
+import StrategyParamsForm, { defaultsFromSchema } from './StrategyParamsForm';
+import RuleBuilder, { defaultCustomParams } from './RuleBuilder';
+
+const STRESS_CLASSIC_SET = new Set<string>(CLASSIC_STRATEGIES);
 
 // ── Scenario metadata ─────────────────────────────────────────────────────────
 
@@ -112,12 +117,13 @@ const SYMBOL_OPTIONS: Record<string, { value: string; label: string }[]> = {
 
 // ── Approximate prices for smart fill ────────────────────────────────────────
 
+// Must stay in sync with data/indian_assets.py:FO_LOT_SIZES (backend source of truth)
 const FO_LOT_SIZES: Record<string, number> = {
   NIFTY50: 50, BANKNIFTY: 15, FINNIFTY: 40, SENSEX: 10,
   RELIANCE: 250, HDFCBANK: 550, TCS: 150, INFY: 300,
-  SBIN: 1500, BAJFINANCE: 125, TATAMOTORS: 900, ICICIBANK: 700,
-  KOTAKBANK: 400, AXISBANK: 1200, LT: 175, SUNPHARMA: 350,
-  WIPRO: 1500, TITAN: 175, MARUTI: 25, BHARTIARTL: 500,
+  SBIN: 1500, BAJFINANCE: 125, TATAMOTORS: 2400, ICICIBANK: 700,
+  KOTAKBANK: 400, AXISBANK: 1200, LT: 300, SUNPHARMA: 700,
+  WIPRO: 2800, TITAN: 375, MARUTI: 75, BHARTIARTL: 1000,
 };
 
 const APPROX_PRICES: Record<string, number> = {
@@ -247,6 +253,7 @@ export const DEFAULT_STRESS_FORM: StressFormState = {
   feePct:       0.1,
   slippagePct:  0.05,
   strategy:     'DCA',
+  strategyParams:     {},
   lowerBound:         0,
   upperBound:         0,
   numLevels:          5,
@@ -306,6 +313,17 @@ export default function StressSidebar({ form, onChange, onRun, loading }: Props)
   const isFutures = form.marketType === 'futures' || form.marketType === 'options';
 
   const set = (updates: Partial<StressFormState>) => onChange(updates);
+
+  const [strategies, setStrategies] = useState<StrategyMeta[]>([]);
+  useEffect(() => { fetchStrategies().then(setStrategies).catch(() => {}); }, []);
+  const selectedMeta = strategies.find(s => s.name === form.strategy);
+
+  const handleStrategyChange = (name: string) => {
+    if (STRESS_CLASSIC_SET.has(name)) { set({ strategy: name }); return; }
+    const meta = strategies.find(s => s.name === name);
+    const seed = name === 'CUSTOM' ? defaultCustomParams() : (meta ? defaultsFromSchema(meta.schema) : {});
+    set({ strategy: name, strategyParams: seed });
+  };
 
   const handleOutlierToggle = (enabled: boolean) => {
     setOutlierEnabled(enabled);
@@ -484,16 +502,35 @@ export default function StressSidebar({ form, onChange, onRun, loading }: Props)
         {/* ── Strategy ─────────────────────────────────────────────────── */}
         <section>
           <p className="text-xs font-bold uppercase tracking-widest text-[var(--tv-muted)] mb-3">Strategy</p>
-          <div className="flex gap-1 mb-3 bg-gray-100 rounded-full p-1">
-            {(['GRID','DCA','PLA'] as Strategy[]).map(s => (
-              <button key={s} onClick={() => set({ strategy: s })}
-                className={`flex-1 py-1.5 text-xs font-semibold rounded-full transition
-                  ${form.strategy === s
-                    ? 'bg-white text-[var(--tv-accent)] shadow-sm'
-                    : 'text-gray-500 hover:text-gray-700'}`}
-              >{s}</button>
-            ))}
-          </div>
+          <select value={form.strategy} onChange={e => handleStrategyChange(e.target.value)} className={`${inp} mb-3`}>
+            {strategies.length === 0 ? (
+              <>
+                <option value="GRID">GRID</option>
+                <option value="DCA">DCA</option>
+                <option value="PLA">PLA</option>
+              </>
+            ) : (
+              ['classic', 'indicator', 'custom'].map(cat => {
+                const inCat = strategies.filter(s => s.category === cat);
+                if (!inCat.length) return null;
+                const label = cat === 'classic' ? 'Classic' : cat === 'indicator' ? 'Indicator' : 'Custom';
+                return (
+                  <optgroup key={cat} label={label}>
+                    {inCat.map(s => <option key={s.name} value={s.name}>{s.description || s.name}</option>)}
+                  </optgroup>
+                );
+              })
+            )}
+          </select>
+
+          {/* Schema-driven params for non-classic strategies */}
+          {form.strategy === 'CUSTOM' && (
+            <RuleBuilder value={form.strategyParams} onChange={next => set({ strategyParams: next })} />
+          )}
+          {!STRESS_CLASSIC_SET.has(form.strategy) && form.strategy !== 'CUSTOM' && selectedMeta && (
+            <StrategyParamsForm schema={selectedMeta.schema} value={form.strategyParams}
+                                onChange={next => set({ strategyParams: next })} />
+          )}
 
           {form.strategy === 'DCA' && (
             <div className="space-y-2">

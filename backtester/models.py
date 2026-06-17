@@ -169,6 +169,45 @@ class AnalyticsEvent(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class StrategyOutcome(Base):
+    """Append-only log of every backtest's {strategy, params, regime, outcome}.
+
+    This is the seed of the strategy-intelligence moat (ROADMAP Track 2 / Phase 0):
+    a growing, proprietary dataset that a future gradient-boosting ranker trains on
+    to answer "which strategy suits this asset/regime?". Written on every backtest
+    run; cheap now, compounding later. Never read on the hot path.
+    """
+    __tablename__ = "strategy_outcomes"
+    __table_args__ = (
+        Index("ix_outcome_strategy", "strategy"),
+        Index("ix_outcome_symbol", "symbol"),
+        Index("ix_outcome_created", "created_at"),
+    )
+
+    id          = Column(Integer, primary_key=True, index=True)
+    backtest_id = Column(String(36))                  # FK-ish link to backtests.id (nullable for stress/forecast)
+    strategy    = Column(String(20), nullable=False)
+    category    = Column(String(20))                  # classic | indicator | custom
+    symbol      = Column(String(20), nullable=False)
+    source      = Column(String(20))
+    interval    = Column(String(10))
+    start_date  = Column(Date)
+    end_date    = Column(Date)
+    capital     = Column(Float)
+    params      = Column(Text)                        # JSON-encoded strategy params
+    # ── Outcome metrics ──
+    total_return_pct = Column(Float)
+    sharpe_ratio     = Column(Float)
+    sortino_ratio    = Column(Float)
+    max_drawdown_pct = Column(Float)
+    win_rate         = Column(Float)
+    profit_factor    = Column(Float)
+    num_trades       = Column(Integer)
+    # ── Market context ──
+    regime_mix  = Column(Text)                         # JSON: {bull, bear, sideways} candle counts
+    created_at  = Column(DateTime, default=datetime.utcnow)
+
+
 class Feedback(Base):
     """In-app feedback submitted by testers."""
     __tablename__ = "feedback"

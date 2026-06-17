@@ -6,6 +6,7 @@ import TradeLog         from './components/TradeLog';
 import RegimeBreakdown  from './components/RegimeBreakdown';
 import ValidationPanel  from './components/ValidationPanel';
 import StressPage       from './components/StressPage';
+import ForwardTestPage  from './components/ForwardTestPage';
 import IdentityGate     from './components/IdentityGate';
 import FeedbackWidget   from './components/FeedbackWidget';
 import AdminDashboard   from './components/AdminDashboard';
@@ -13,7 +14,7 @@ import { FormState, BacktestResponse } from './types';
 import { runBacktest, isIndianSource, validateAdminToken } from './api';
 import { getIdentity, getAdminToken, setAdminToken, track, trackPageView } from './analytics';
 
-type Page = 'backtest' | 'stress' | 'admin';
+type Page = 'backtest' | 'stress' | 'forward' | 'admin';
 
 const today = new Date();
 const fmt   = (d: Date) => d.toISOString().split('T')[0];
@@ -31,6 +32,7 @@ const DEFAULT_FORM: FormState = {
   feePct:       0.10,
   slippagePct:  0.05,
   strategy:     'DCA',
+  strategyParams:     {},
   lowerBound:         20_000,
   upperBound:         70_000,
   numLevels:          5,
@@ -164,8 +166,9 @@ export default function App() {
         {/* Page pills */}
         <div className="flex gap-1 bg-gray-100 rounded-full p-1">
           {([
-            { key: 'backtest', label: '📈 Backtest'   },
-            { key: 'stress',   label: '🧪 Stress Test' },
+            { key: 'backtest', label: '📈 Backtest'    },
+            { key: 'stress',   label: '🧪 Stress Test'  },
+            { key: 'forward',  label: '🔭 Forward Test' },
             ...(adminToken ? [{ key: 'admin', label: '🔒 Admin' }] : []),
           ] as { key: Page; label: string }[]).map(p => (
             <button key={p.key} onClick={() => { setPage(p.key); track('switch_page', { to: p.key }, 'action', page); }}
@@ -196,6 +199,10 @@ export default function App() {
       ) : page === 'stress' ? (
         <div className="flex-1 overflow-hidden">
           <StressPage />
+        </div>
+      ) : page === 'forward' ? (
+        <div className="flex-1 overflow-hidden">
+          <ForwardTestPage />
         </div>
       ) : (
       <div className="flex flex-1 overflow-hidden">
