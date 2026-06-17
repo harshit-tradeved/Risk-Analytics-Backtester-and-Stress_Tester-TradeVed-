@@ -4,7 +4,7 @@ import ForwardTestSidebar, { DEFAULT_FORECAST_FORM } from './ForwardTestSidebar'
 import ForwardTestResults from './ForwardTestResults';
 import MCPathsCanvas, { MCRun } from './MCPathsCanvas';
 import PaperTradeView from './PaperTradeView';
-import { streamForwardTest, streamCrisisTest, compareForecastMethods, isIndianSource, StreamRun } from '../api';
+import { streamForwardTest, streamCrisisTest, isIndianSource, StreamRun } from '../api';
 
 type SubMode = 'forward' | 'crisis' | 'paper';
 
@@ -197,7 +197,6 @@ export default function ForwardTestPage() {
   const [subMode,       setSubMode]       = useState<SubMode>('forward');
   const [crisisScenario,setCrisisScenario]= useState('covid_crash');
   const [severity,      setSeverity]      = useState(1.0);
-  const [comparing,     setComparing]     = useState(false);
   const cleanupRef = useRef<(() => void) | null>(null);
 
   // Derived helpers
@@ -207,20 +206,7 @@ export default function ForwardTestPage() {
   const handleChange = (updates: Partial<ForecastFormState>) =>
     setForm(prev => ({ ...prev, ...updates }));
 
-  const handleRunCompare = useCallback(async () => {
-    if (pageState.kind !== 'complete') return;
-    setComparing(true);
-    try {
-      const compareResult = await compareForecastMethods(form);
-      setPageState(prev => prev.kind === 'complete' ? { ...prev, compare: compareResult } : prev);
-    } catch (e) {
-      // non-fatal — just don't show comparison
-    } finally {
-      setComparing(false);
-    }
-  }, [form, pageState]);
-
-  const handleRun = useCallback(() => {
+const handleRun = useCallback(() => {
     cleanupRef.current?.();
     setPageState({ kind: 'live', live: { ...EMPTY_LIVE, total: form.nPaths } });
 
@@ -351,24 +337,6 @@ export default function ForwardTestPage() {
               </p>
             </div>
 
-            {/* Compare button — shown after a forward test completes */}
-            {pageState.kind === 'complete' && !crisisMode && (
-              <button onClick={handleRunCompare} disabled={comparing}
-                className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold transition-all border ${
-                  comparing
-                    ? 'bg-gray-50 text-gray-400 border-gray-200'
-                    : 'bg-white text-indigo-600 border-indigo-200 hover:bg-indigo-50 shadow-sm'
-                }`}>
-                {comparing ? (
-                  <>
-                    <div className="w-3.5 h-3.5 border-2 border-gray-300 border-t-indigo-500 rounded-full animate-spin" />
-                    Comparing…
-                  </>
-                ) : (
-                  <>⚖️ Compare Kronos vs Bootstrap</>
-                )}
-              </button>
-            )}
           </div>
 
           {/* Paper Trade mode — rendered exclusively */}
