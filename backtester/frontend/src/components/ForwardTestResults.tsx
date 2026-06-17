@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ForecastResponse, ForecastCompareResult, RegimeDistribution } from '../types';
 import MCPathsCanvas, { MCRun } from './MCPathsCanvas';
+import CrisisFanChart from './CrisisFanChart';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -415,13 +416,53 @@ export default function ForwardTestResults({
     <div className="space-y-6">
 
       {/* ── Header ───────────────────────────────────────────────────── */}
-      <div className={`rounded-2xl p-5 ${isCrisis ? 'bg-gradient-to-r from-gray-950 to-orange-950 border border-orange-900/40' : 'bg-white'}`}>
+      {isCrisis ? (
+        <div style={{ background: '#0d1117', border: '1px solid #ea580c40', borderRadius: 16, padding: '20px 24px' }}>
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span style={{ fontSize: 18 }}>🔥</span>
+                <h2 style={{ fontSize: 18, fontWeight: 700, color: '#fff', margin: 0 }}>Crisis Simulation Results</h2>
+              </div>
+              <p style={{ fontSize: 13, color: '#6b7280', display: 'flex', gap: 8, flexWrap: 'wrap' as const, margin: 0, alignItems: 'center' }}>
+                <span style={{ color: '#9ca3af' }}>{result.symbol} · {result.strategy}</span>
+                {forecast && (
+                  <>
+                    <span style={{ color: '#374151' }}>·</span>
+                    <span style={{ color: '#9ca3af', fontWeight: 600 }}>{forecast.horizon_days}d horizon</span>
+                    <span style={{ color: '#374151' }}>·</span>
+                    <span style={{ color: '#9ca3af', fontWeight: 600 }}>{forecast.n_paths} paths</span>
+                    {forecast.scenario_display && (
+                      <span style={{ padding: '1px 8px', borderRadius: 99, fontSize: 10, fontWeight: 700, background: '#7f1d1d40', color: '#fca5a5', border: '1px solid #7f1d1d' }}>
+                        ⚠ {forecast.scenario_display}
+                      </span>
+                    )}
+                    <span style={{ padding: '1px 8px', borderRadius: 99, fontSize: 10, fontWeight: 700, background: '#1c1917', color: '#78716c', border: '1px solid #292524' }}>
+                      {methodLabel}
+                    </span>
+                  </>
+                )}
+              </p>
+            </div>
+            {survivalPct != null && (
+              <div style={{
+                padding: '8px 16px', borderRadius: 99, fontSize: 13, fontWeight: 700, border: '1px solid',
+                ...(survivalPct >= 60
+                  ? { background: '#052e16', color: '#4ade80', borderColor: '#166534' }
+                  : survivalPct >= 40
+                    ? { background: '#422006', color: '#fb923c', borderColor: '#9a3412' }
+                    : { background: '#450a0a', color: '#f87171', borderColor: '#991b1b' }),
+              }}>
+                {survivalPct.toFixed(0)}% crisis survival
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
-            <h2 className={`text-xl font-bold ${isCrisis ? 'text-orange-100' : 'text-[var(--tv-text)]'}`}>
-              {isCrisis ? '🔥 Crisis Simulation Results' : '🔭 Forward Test Results'}
-            </h2>
-            <p className={`text-sm flex items-center gap-2 flex-wrap mt-1 ${isCrisis ? 'text-orange-300/70' : 'text-[var(--tv-muted)]'}`}>
+            <h2 className="text-xl font-bold text-[var(--tv-text)]">🔭 Forward Test Results</h2>
+            <p className="text-sm text-[var(--tv-muted)] flex items-center gap-2 flex-wrap mt-0.5">
               <span>{result.symbol} · {result.strategy}</span>
               {forecast && (
                 <>
@@ -432,35 +473,24 @@ export default function ForwardTestResults({
                   <span>·</span>
                   <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                     method === 'kronos'
-                      ? 'bg-teal-900/60 text-teal-300 border border-teal-700'
-                      : isCrisis
-                        ? 'bg-orange-900/60 text-orange-300 border border-orange-700'
-                        : 'bg-indigo-50 text-indigo-600 border border-indigo-200'
+                      ? 'bg-teal-50 text-teal-700 border border-teal-200'
+                      : 'bg-indigo-50 text-indigo-600 border border-indigo-200'
                   }`}>{methodLabel}</span>
-                  {isCrisis && forecast.scenario_display && (
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-900/60 text-red-300 border border-red-700">
-                      ⚠ {forecast.scenario_display}
-                    </span>
-                  )}
                 </>
               )}
             </p>
           </div>
           {survivalPct != null && (
             <div className={`px-4 py-2 rounded-full text-sm font-bold border ${
-              isCrisis
-                ? survivalPct >= 60 ? 'bg-teal-900/50 text-teal-300 border-teal-700'
-                  : survivalPct >= 40 ? 'bg-yellow-900/50 text-yellow-300 border-yellow-700'
-                  : 'bg-red-900/50 text-red-300 border-red-700'
-                : survivalPct >= 60 ? 'bg-teal-50 text-teal-700 border-teal-200'
-                  : survivalPct >= 40 ? 'bg-yellow-50 text-yellow-700 border-yellow-200'
-                  : 'bg-red-50 text-red-600 border-red-200'
+              survivalPct >= 60 ? 'bg-teal-50 text-teal-700 border-teal-200'
+              : survivalPct >= 40 ? 'bg-yellow-50 text-yellow-700 border-yellow-200'
+              : 'bg-red-50 text-red-600 border-red-200'
             }`}>
-              {survivalPct.toFixed(0)}% {isCrisis ? 'crisis survival' : 'forward survival'}
+              {survivalPct.toFixed(0)}% forward survival
             </div>
           )}
         </div>
-      </div>
+      )}
 
       {/* ── No-trades warning ────────────────────────────────────────── */}
       {noTrades && (
@@ -579,27 +609,37 @@ export default function ForwardTestResults({
         <CrisisHistogram runs={mc.per_run} />
       )}
 
-      {/* ── Equity spaghetti canvas ───────────────────────────────────── */}
+      {/* ── Equity paths ─────────────────────────────────────────────── */}
       {mcRuns.length > 0 && !noTrades && (
         <div>
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
-            {isCrisis ? 'Stressed Equity Paths — per scenario path' : 'Strategy Equity Paths across Synthetic Futures'}
+            {isCrisis ? 'Stressed Equity Fan Chart — percentile bands across paths' : 'Strategy Equity Paths across Synthetic Futures'}
           </p>
-          <MCPathsCanvas
-            runs={mcRuns}
-            baselineEquity={series.baseline_equity ?? []}
-            timestamps={series.timestamps ?? []}
-            tsIndices={tsIndices}
-            capital={baseline?.initial_capital ?? 10_000}
-            currency={currency}
-            locale={locale}
-            height={isCrisis ? 260 : 340}
-          />
-          <p className="text-[10px] text-gray-300 mt-2 text-center">
-            {isCrisis
-              ? 'Each path has Kronos micro-structure + crisis scaffold applied · click to pin a path'
-              : 'Colour: red = loss path · teal = gain path · click to pin · delta toggle for relative impact'}
-          </p>
+          {isCrisis ? (
+            <CrisisFanChart
+              runs={mcRuns}
+              baselineEquity={series.baseline_equity ?? []}
+              capital={baseline?.initial_capital ?? 10_000}
+              currency={currency}
+              height={320}
+            />
+          ) : (
+            <>
+              <MCPathsCanvas
+                runs={mcRuns}
+                baselineEquity={series.baseline_equity ?? []}
+                timestamps={series.timestamps ?? []}
+                tsIndices={tsIndices}
+                capital={baseline?.initial_capital ?? 10_000}
+                currency={currency}
+                locale={locale}
+                height={340}
+              />
+              <p className="text-[10px] text-gray-300 mt-2 text-center">
+                Colour: red = loss path · teal = gain path · click to pin · delta toggle for relative impact
+              </p>
+            </>
+          )}
         </div>
       )}
 
