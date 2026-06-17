@@ -1852,6 +1852,7 @@ async def stream_forecast_sse(req: ForecastRequest):
         yield _ev({"type": "fetching_paths", "total": n_paths_})
         try:
             _kurl = os.getenv("KRONOS_URL")
+            logger.info("forward/stream: generating %d paths  kurl=%s", n_paths_, bool(_kurl))
             if _kurl:
                 from engine.forecast import KronosClient as _KC
                 _client = _KC(_kurl)
@@ -1861,11 +1862,13 @@ async def stream_forecast_sse(req: ForecastRequest):
                      (req_snap.seed + s) if req_snap.seed is not None else None)
                     for s in range(0, n_paths_, _BATCH)
                 ]
+                logger.info("forward/stream: firing %d concurrent Kronos batches of ~%d paths", len(_specs), _BATCH)
                 _batches = await asyncio.gather(*[
                     asyncio.to_thread(_client.generate_paths, df_snap, bn, horizon_, bs)
                     for bn, bs in _specs
                 ])
                 all_paths: list = [p for batch in _batches for p in batch]
+                logger.info("forward/stream: all %d paths received", len(all_paths))
             else:
                 from engine.forecast import _block_bootstrap_paths as _bbp
                 all_paths = await asyncio.to_thread(
