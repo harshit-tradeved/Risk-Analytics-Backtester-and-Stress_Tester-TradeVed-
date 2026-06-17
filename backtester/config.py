@@ -30,7 +30,10 @@ for _d in [DATA_STORAGE_DIR, REPORTS_DIR, CHARTS_DIR, LOGS_DIR]:
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR / 'backtester.db'}")
 
 # ── Admin auth (set ADMIN_TOKEN env var in production) ───────────────────────
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "dev-admin-token-change-in-prod")
+# No hardcoded fallback: an unset env var yields a random per-process token so
+# admin endpoints are never reachable with a publicly known default.
+import secrets as _secrets
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN") or _secrets.token_hex(32)
 
 # ── API Settings ─────────────────────────────────────────────────────────────
 API_TITLE       = "TradeVed Backtester API"

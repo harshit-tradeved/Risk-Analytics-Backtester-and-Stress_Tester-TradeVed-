@@ -692,6 +692,118 @@ def test_trade_mc_needs_three_trades():
 run_test("trade_mc returns zero runs when fewer than 3 trades (Feature B)", test_trade_mc_needs_three_trades)
 
 # ─────────────────────────────────────────────────────────────────────────────
+# INDICATOR ENGINE + STRATEGY EXTENSION (ROADMAP Track 1)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _synthetic_ohlcv(n=300, seed=7):
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    t = np.arange(n)
+    close = pd.Series(100 + 0.12 * t + 12 * np.sin(t / 22) + np.cumsum(rng.standard_normal(n)) * 0.7)
+    high = close + abs(rng.standard_normal(n)) * 0.6
+    low = close - abs(rng.standard_normal(n)) * 0.6
+    return pd.DataFrame({
+        "timestamp": pd.date_range("2023-01-01", periods=n, freq="D"),
+        "open": close.shift(1).fillna(close.iloc[0]),
+        "high": high, "low": low, "close": close,
+        "volume": pd.Series(rng.integers(1000, 9000, n)).astype(float),
+    })
+
+
+def test_indicator_reference_values():
+    from engine.indicators import compute, INDICATOR_CATALOG, TOTAL_OUTPUT_SERIES
+    # Wilder RSI on the canonical StockCharts series → ~70.5 at index 14
+    s = pd.Series([44.34,44.09,44.15,43.61,44.33,44.83,45.10,45.42,45.84,46.08,
+                   45.89,46.03,45.61,46.28,46.28,46.00,46.03,46.41,46.22,45.64])
+    ref = pd.DataFrame({"open": s, "high": s, "low": s, "close": s, "volume": [1]*len(s)})
+    rsi = compute(ref, "rsi", length=14)["rsi"]
+    assert abs(float(rsi.iloc[14]) - 70.5) < 1.0, f"RSI={rsi.iloc[14]}"
+    # ATR of a constant TR=2 series converges to 2.0
+    flat = pd.DataFrame({"high": [10]*30, "low": [8]*30, "close": [9]*30, "open": [9]*30, "volume": [1]*30})
+    assert abs(float(compute(flat, "atr", length=14)["atr"].iloc[-1]) - 2.0) < 1e-6
+    # MACD histogram identity
+    df = _synthetic_ohlcv()
+    m = compute(df, "macd")
+    import numpy as np
+    assert np.allclose((m["macd"] - m["macd_signal"]).dropna(), m["macd_hist"].dropna())
+    # Bollinger ordering lower < mid < upper
+    bb = compute(df, "bbands", length=20, std=2.0).dropna()
+    assert (bb.bb_lower < bb.bb_mid).all() and (bb.bb_mid < bb.bb_upper).all()
+    assert TOTAL_OUTPUT_SERIES == sum(len(e["outputs"]) for e in INDICATOR_CATALOG)
+    print(f"  indicators={len(INDICATOR_CATALOG)} output_series={TOTAL_OUTPUT_SERIES} RSI[14]={rsi.iloc[14]:.2f}")
+
+run_test("Indicator engine reference values (RSI/ATR/MACD/Bollinger)", test_indicator_reference_values)
+
+
+def test_indicator_catalog_compute_all():
+    from engine.indicators import INDICATOR_CATALOG, compute
+    df = _synthetic_ohlcv()
+    for e in INDICATOR_CATALOG:
+        out = compute(df, e["key"])
+        assert list(out.columns) == e["outputs"], (e["key"], list(out.columns))
+        assert not out.dropna().empty, f"{e['key']} all-NaN"
+    print(f"  all {len(INDICATOR_CATALOG)} indicators compute; columns match catalog")
+
+run_test("Indicator catalog: every indicator computes with declared outputs", test_indicator_catalog_compute_all)
+
+
+def test_preset_strategies_emit_valid_signals():
+    from strategies import STRATEGY_REGISTRY
+    df = _synthetic_ohlcv()
+    presets = ["RSI", "MACD", "BOLLINGER", "SUPERTREND", "DONCHIAN", "MACROSS"]
+    for name in presets:
+        cls = STRATEGY_REGISTRY[name]
+        out = cls(**cls.default_params()).generate_signals(df)
+        assert {"signal", "quantity", "meta"} <= set(out.columns), name
+        assert set(out["signal"].unique()) <= {"BUY", "SELL", "HOLD"}, name
+        assert cls.category() == "indicator", name
+        assert len(cls.parameter_schema()) >= 2, name
+    print(f"  {len(presets)} indicator presets emit valid signal/quantity/meta frames")
+
+run_test("Indicator preset strategies emit valid signals", test_preset_strategies_emit_valid_signals)
+
+
+def test_custom_strategy_evaluator():
+    from strategies import STRATEGY_REGISTRY
+    from engine.indicators import compute
+    import numpy as np
+    df = pd.DataFrame()
+    n = 250
+    rng = np.random.default_rng(3)
+    close = pd.Series(100 + 15 * np.sin(np.arange(n) / 12) + np.cumsum(rng.standard_normal(n)) * 0.4)
+    df = pd.DataFrame({"timestamp": pd.date_range("2023-01-01", periods=n, freq="D"),
+                       "open": close.shift(1).fillna(close.iloc[0]),
+                       "high": close + 1, "low": close - 1, "close": close,
+                       "volume": pd.Series(rng.integers(1000, 9000, n)).astype(float)})
+    Custom = STRATEGY_REGISTRY["CUSTOM"]
+    s = Custom(**Custom.default_params())  # RSI<30 BUY / RSI>70 SELL
+    out = s.generate_signals(df)
+    rsi = compute(df, "rsi", length=14)["rsi"]
+    buys = out[out.signal == "BUY"].index
+    sells = out[out.signal == "SELL"].index
+    assert len(buys) > 0, "expected at least one BUY"
+    assert all(rsi.iloc[i] < 30 for i in buys), "every BUY must be at RSI<30"
+    assert all(rsi.iloc[i] > 70 for i in sells), "every SELL must be at RSI>70"
+    assert Custom.category() == "custom"
+    print(f"  CUSTOM rsi<30/rsi>70: buys={len(buys)} sells={len(sells)} (all gated correctly)")
+
+run_test("CustomStrategy rule evaluator gates signals correctly", test_custom_strategy_evaluator)
+
+
+def test_strategy_schema_shape():
+    from strategies import STRATEGY_REGISTRY
+    for name, cls in STRATEGY_REGISTRY.items():
+        sch = cls.parameter_schema()
+        assert isinstance(sch, dict) and sch, name
+        for pname, meta in sch.items():
+            assert "type" in meta and "default" in meta, (name, pname)
+            assert meta["type"] in ("number", "select", "bool", "text", "array"), (name, pname, meta["type"])
+    print(f"  all {len(STRATEGY_REGISTRY)} strategies expose well-formed parameter schemas")
+
+run_test("Strategy parameter_schema shape is valid for all strategies", test_strategy_schema_shape)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # SUMMARY
 # ─────────────────────────────────────────────────────────────────────────────
 print()
@@ -705,4 +817,10 @@ if failed:
         if r[0]=="FAIL":
             print(f"  [{r[1]}] {r[2]}")
 print("=" * 60)
-sys.exit(0 if failed == 0 else 1)
+if __name__ == "__main__":
+    # Only exit when run as a script — a module-level sys.exit() crashes pytest
+    # collection with INTERNALERROR.
+    sys.exit(0 if failed == 0 else 1)
+elif failed:
+    # Under pytest: surface failures as a collection error instead of exiting.
+    raise AssertionError(f"{failed} test(s) failed — see output above")

@@ -178,6 +178,19 @@ backtester/
 
 **PLA** — EMA crossover entry + cascading average-down. Params: `fast_ema`, `slow_ema`, `entry_levels` [0, -1, -2.5, -4], `invest_per_level_usd` [L1, L1, 2×L1, 3×L1], `exit_type` (crossover/take_profit/stop_loss). **Cascades only fire if price dips below entry after golden cross — use Daily candles, not Weekly.**
 
+These three are the **classic** strategies (category `classic`). See **Indicator Engine & Strategy Extension** below for the indicator presets and rule builder.
+
+### Indicator Engine & Strategy Extension (ROADMAP.md Track 1)
+- **`engine/indicators.py`** — pure pandas/numpy indicator engine (NO pandas-ta: it breaks on the pinned numpy 2.4 / pandas 3.0). `INDICATOR_CATALOG` (25 indicators, 40 output series, grouped overlap/momentum/trend/volatility/volume) + `compute(df, key, **params) -> DataFrame` with stable output column names (`rsi`, `macd_signal`, `bb_lower`, …). Wilder smoothing in `rma()` is SMA-seeded (RSI/ATR/ADX match textbook values). Exposed via `GET /api/indicators`.
+- **Schema-driven params:** `BaseStrategy.parameter_schema()` returns structured UI metadata per param (`type/label/min/max/step/options/group/depends_on`), built by `param_schema()` (rich declarations via the `Param(...)` helper) overlaid on values auto-derived from `default_params()`. `BaseStrategy.category()` returns `classic|indicator|custom`. `GET /api/strategies` now returns `category` + `schema` alongside flat `parameters`.
+- **`signals_from_masks(df, entry_mask, exit_mask, invest_usd, qty_fallback)`** (in `strategies/base.py`) — shared long-only state machine converting boolean masks → signal/quantity/meta. Used by every indicator preset AND the rule builder, so signal-walking lives in one place.
+- **Indicator presets** (category `indicator`, registered in `STRATEGY_REGISTRY`): `RSI`, `MACD`, `BOLLINGER`, `SUPERTREND`, `DONCHIAN`, `MACROSS`. Each uses `compute()` + `signals_from_masks`, dollar-or-units sizing via `invest_per_trade_usd`/`quantity`.
+- **Rule builder** (`strategies/custom.py: CustomStrategy`, category `custom`, name `CUSTOM`): `entry_rules`/`exit_rules` are condition lists (`{left, operator (>/</>=/<=/cross_above/cross_below), right}` where operands are `{indicator,params,output}` | `{price}` | `{value}`), combined via `logic` AND/OR. Evaluator computes indicators via the engine → boolean masks → `signals_from_masks`.
+- **Frontend (hybrid):** classic GRID/DCA/PLA keep their dedicated flat form fields; all other strategies use the schema-driven `StrategyParamsForm.tsx` (renders from `/api/strategies` schema, honors `group`/`depends_on`), and `CUSTOM` uses `RuleBuilder.tsx` (fetches `/api/indicators`). `FormState`/`StressFormState` gained `strategyParams: Record<string, unknown>`; `Strategy` type is now `string`; `buildStrategyParams` returns `strategyParams` for non-classic strategies. The strategy dropdown (Sidebar + StressSidebar) is populated from `/api/strategies`, grouped by category.
+
+### Strategy-Outcome Logging (ROADMAP.md Track 2 / Phase 0 — moat seed)
+- `models.StrategyOutcome` table: append-only `{strategy, category, params, symbol, source, interval, dates, regime_mix, outcome metrics}` written on every backtest (best-effort; a logging failure never fails the run). Auto-created via `create_all` — no migration. Seeds the future strategy-intelligence ranker. Observable via `GET /api/strategy-outcomes/summary`.
+
 ### Metrics (all via `engine/metrics.py`)
 - Annualisation: `TRADING_DAYS_PER_YEAR = 252`
 - Sharpe: `(mean_daily_return - rf) / std_daily_return * sqrt(252)` — `rf = 0`
@@ -330,6 +343,9 @@ python stress_validation.py
 
 ## Do NOT
 
+- Do not add `pandas-ta` (or any TA lib that does `from numpy import NaN`) — it breaks on the pinned numpy 2.4 / pandas 3.0 and the Railway build. Add indicators to `engine/indicators.py` in pure pandas/numpy instead, and register them in `INDICATOR_CATALOG` (with `outputs` column names).
+- Do not add a new strategy without registering it in `STRATEGY_REGISTRY` (`strategies/__init__.py`) and giving it a `CATEGORY` + `param_schema()`. The frontend dropdown and forms are driven by `/api/strategies`, so a registered strategy with a schema needs **zero** frontend changes (non-classic strategies render via `StrategyParamsForm`/`RuleBuilder` automatically).
+- Do not add dedicated flat FormState fields for new strategies — only the three classic ones (GRID/DCA/PLA) use flat fields; everything else flows through `form.strategyParams`. `buildStrategyParams` returns `strategyParams` for non-classic strategies.
 - Do not modify `FO_LOT_SIZES` in `Sidebar.tsx` without also updating `data/indian_assets.py` (they must stay in sync). Same applies to `StressSidebar.tsx`.
 - Do not use `%%` in Python f-strings (prints two `%` signs — just use `%`)
 - Do not call `_calculate_cost(..., track=True)` twice for the same trade leg

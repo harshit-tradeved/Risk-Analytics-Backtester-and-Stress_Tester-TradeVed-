@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import math
+import os
 import uuid
 from copy import deepcopy
 from datetime import date, datetime
@@ -110,11 +111,18 @@ app = FastAPI(
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+# Without this middleware slowapi's default_limits are never enforced —
+# the Limiter + handler alone do nothing for undecorated routes.
+from slowapi.middleware import SlowAPIMiddleware
+app.add_middleware(SlowAPIMiddleware)
 
+# "*" with allow_credentials=True is an invalid CORS combo (browsers reject it).
+# Pin origins via ALLOWED_ORIGINS=https://app.example.com,... in production.
+_allowed_origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "*").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_allowed_origins,
+    allow_credentials=_allowed_origins != ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -127,8 +135,10 @@ async def _api_tracking_middleware(request: Request, call_next):
     start = time.monotonic()
     response = await call_next(request)
     path = request.url.path
-    # Skip tracking endpoints themselves to prevent recursion/noise
-    if path.startswith(f"{API_PREFIX}/track") or path.startswith(f"{API_PREFIX}/admin"):
+    # Skip tracking endpoints themselves to prevent recursion/noise; skip
+    # high-volume read paths and preflights so SQLite isn't written per request.
+    if (path.startswith(f"{API_PREFIX}/track") or path.startswith(f"{API_PREFIX}/admin")
+            or path.startswith(f"{API_PREFIX}/data") or request.method == "OPTIONS"):
         return response
     if not path.startswith(API_PREFIX):
         return response
@@ -160,8 +170,29 @@ fetcher   = DataFetcher()
 validator = DataValidator()
 eda_engine = EDAEngine()
 
-# ── Simple in-memory cache ────────────────────────────────────────────────────
+# ── Simple in-memory cache (bounded — holds full DataFrames per backtest) ────
+_CACHE_MAX_ENTRIES = 20
 _cache: dict[str, Any] = {}
+
+def _cache_put(key: str, value: Any) -> None:
+    _cache[key] = value
+    while len(_cache) > _CACHE_MAX_ENTRIES:
+        _cache.pop(next(iter(_cache)))  # evict oldest (insertion order)
+
+
+def _ensure_grid_bounds(strategy_params: dict, df: pd.DataFrame) -> None:
+    """Auto-compute GRID bounds in-place when unset/inverted or when the user
+    bounds don't overlap the data. Works for sub-$1 assets (no absolute clamp)."""
+    lo = float(strategy_params.get("lower_bound", 0) or 0)
+    hi = float(strategy_params.get("upper_bound", 0) or 0)
+    prices = df["close"].astype(float)
+    lo_raw, hi_raw = float(prices.min()), float(prices.max())
+    if lo >= hi or lo > hi_raw or hi < lo_raw:
+        pad = (hi_raw - lo_raw) * 0.10
+        strategy_params["lower_bound"] = _round_nice(max(lo_raw * 0.5, lo_raw - pad), "floor")
+        strategy_params["upper_bound"] = _round_nice(hi_raw + pad, "ceil")
+        logger.info("GRID bounds auto-set: lower=%s upper=%s (price range %.6g–%.6g)",
+                    strategy_params["lower_bound"], strategy_params["upper_bound"], lo_raw, hi_raw)
 
 # ── Startup ────────────────────────────────────────────────────────────────────
 @app.on_event("startup")
@@ -176,7 +207,7 @@ def on_startup():
 
 class BacktestRequest(BaseModel):
     symbol:     str         = Field("BTC/USDT", description="Trading pair or NSE/BSE symbol")
-    strategy:   str         = Field("GRID",     description="GRID | DCA | PLA")
+    strategy:   str         = Field("GRID",     description="GRID | DCA | PLA | RSI | MACD | BOLLINGER | SUPERTREND | DONCHIAN | MACROSS | CUSTOM")
     start_date: date        = Field(...,         description="Start date (YYYY-MM-DD)")
     end_date:   date        = Field(...,         description="End date (YYYY-MM-DD)")
     capital:    float       = Field(DEFAULT_CAPITAL)
@@ -242,7 +273,8 @@ class FeedbackRequest(BaseModel):
 
 
 def _require_admin(x_admin_token: Optional[str] = Header(None)):
-    if x_admin_token != ADMIN_TOKEN:
+    import hmac
+    if not x_admin_token or not hmac.compare_digest(x_admin_token, ADMIN_TOKEN):
         raise HTTPException(status_code=401, detail="Invalid or missing admin token")
 
 
@@ -273,18 +305,28 @@ def get_data(
     db:         Session = Depends(get_db),
 ):
     """Fetch OHLCV data for a symbol. Tries DB cache first, then external source."""
-    # DB check
-    existing = (
-        db.query(models.OHLCVData)
-        .filter(
-            models.OHLCVData.symbol == symbol,
-            models.OHLCVData.source == source,
-            models.OHLCVData.timestamp >= datetime.combine(start_date, datetime.min.time()),
-            models.OHLCVData.timestamp <= datetime.combine(end_date,   datetime.max.time()),
+    # DB check. The cache table has no interval column, so it can only serve
+    # daily requests; it must also actually cover the requested range, otherwise
+    # a previous narrower fetch would be returned as if complete.
+    existing = []
+    if interval == "1d":
+        existing = (
+            db.query(models.OHLCVData)
+            .filter(
+                models.OHLCVData.symbol == symbol,
+                models.OHLCVData.source == source,
+                models.OHLCVData.timestamp >= datetime.combine(start_date, datetime.min.time()),
+                models.OHLCVData.timestamp <= datetime.combine(end_date,   datetime.max.time()),
+            )
+            .order_by(models.OHLCVData.timestamp)
+            .all()
         )
-        .order_by(models.OHLCVData.timestamp)
-        .all()
-    )
+        if existing:
+            from datetime import timedelta as _td
+            covers = (existing[0].timestamp.date() <= start_date + _td(days=5)
+                      and existing[-1].timestamp.date() >= end_date - _td(days=5))
+            if not covers:
+                existing = []
 
     if existing:
         return {
@@ -301,8 +343,8 @@ def get_data(
 
     val = validator.validate(df)
 
-    # Persist to DB
-    for _, row in df.iterrows():
+    # Persist to DB (skip non-daily — table has no interval column, see above)
+    for _, row in (df.iterrows() if interval == "1d" else []):
         try:
             db.merge(models.OHLCVData(
                 symbol        = symbol,
@@ -375,10 +417,64 @@ def list_strategies():
         {
             "name":        name,
             "description": cls.description(),
-            "parameters":  cls.default_params(),
+            "category":    cls.category(),
+            "parameters":  cls.default_params(),   # back-compat: flat defaults
+            "schema":      cls.parameter_schema(),  # structured UI metadata
         }
         for name, cls in STRATEGY_REGISTRY.items()
     ]
+
+
+@app.get(f"{API_PREFIX}/indicators", tags=["Strategies"])
+def list_indicators():
+    """
+    Return the technical-indicator catalog (powers the rule-builder UI and
+    documents the indicator library). Each entry has: key, label, group,
+    params (with default/min/max/step), and outputs (stable column names).
+    """
+    from engine.indicators import INDICATOR_CATALOG, GROUPS, TOTAL_OUTPUT_SERIES
+    return {
+        "groups": list(GROUPS),
+        "count": len(INDICATOR_CATALOG),
+        "output_series": TOTAL_OUTPUT_SERIES,
+        "indicators": INDICATOR_CATALOG,
+    }
+
+
+@app.get(f"{API_PREFIX}/strategy-outcomes/summary", tags=["Strategies"])
+def strategy_outcomes_summary(db: Session = Depends(get_db)):
+    """Aggregate view of the strategy-outcome log (the moat seed).
+
+    Returns total rows and per-strategy averages so the accumulating dataset is
+    observable. Read-only; safe to expose."""
+    from sqlalchemy import func
+    rows = (
+        db.query(
+            models.StrategyOutcome.strategy,
+            models.StrategyOutcome.category,
+            func.count(models.StrategyOutcome.id).label("runs"),
+            func.avg(models.StrategyOutcome.total_return_pct).label("avg_return_pct"),
+            func.avg(models.StrategyOutcome.sharpe_ratio).label("avg_sharpe"),
+            func.avg(models.StrategyOutcome.win_rate).label("avg_win_rate"),
+        )
+        .group_by(models.StrategyOutcome.strategy, models.StrategyOutcome.category)
+        .all()
+    )
+    total = db.query(func.count(models.StrategyOutcome.id)).scalar() or 0
+    return {
+        "total_outcomes": int(total),
+        "by_strategy": [
+            {
+                "strategy":       r.strategy,
+                "category":       r.category,
+                "runs":           int(r.runs),
+                "avg_return_pct": round(float(r.avg_return_pct), 2) if r.avg_return_pct is not None else None,
+                "avg_sharpe":     round(float(r.avg_sharpe), 3) if r.avg_sharpe is not None else None,
+                "avg_win_rate":   round(float(r.avg_win_rate), 2) if r.avg_win_rate is not None else None,
+            }
+            for r in rows
+        ],
+    }
 
 
 @app.get(f"{API_PREFIX}/strategies/{{strategy}}/defaults", tags=["Strategies"])
@@ -600,22 +696,8 @@ def run_backtest(req: BacktestRequest, db: Session = Depends(get_db)):
         strategy_cls    = STRATEGY_REGISTRY[strategy_name]
         strategy_params = {**strategy_cls.default_params(), **req.params}
 
-        # Auto-compute GRID bounds when both are 0/equal OR when user bounds don't overlap the data
         if strategy_name == "GRID":
-            lo = float(strategy_params.get("lower_bound", 0) or 0)
-            hi = float(strategy_params.get("upper_bound", 0) or 0)
-            prices   = df["close"].astype(float)
-            lo_raw   = float(prices.min())
-            hi_raw   = float(prices.max())
-            if lo >= hi or lo > hi_raw or hi < lo_raw:
-                pad      = (hi_raw - lo_raw) * 0.10
-                strategy_params["lower_bound"] = _round_nice(max(1.0, lo_raw - pad), "floor")
-                strategy_params["upper_bound"] = _round_nice(hi_raw + pad, "ceil")
-                logger.info(
-                    "GRID bounds auto-set: lower=%.2f upper=%.2f (from price range %.2f–%.2f)",
-                    strategy_params["lower_bound"], strategy_params["upper_bound"],
-                    lo_raw, hi_raw,
-                )
+            _ensure_grid_bounds(strategy_params, df)
 
         strategy_inst   = strategy_cls(**strategy_params)
         signals_df      = strategy_inst.generate_signals(df)
@@ -757,11 +839,39 @@ def run_backtest(req: BacktestRequest, db: Session = Depends(get_db)):
                 fees        = t["fees"],
             ))
 
+        # ── Strategy-outcome log (moat seed — ROADMAP Track 2 / Phase 0) ──────
+        # Append-only {strategy, params, regime, outcome} row. Best-effort: a
+        # logging failure must never fail the backtest.
+        try:
+            regime_mix = regimes_data.get("regime_counts") if isinstance(regimes_data, dict) else None
+            db.add(models.StrategyOutcome(
+                backtest_id      = backtest_id,
+                strategy         = strategy_name,
+                category         = strategy_cls.category(),
+                symbol           = req.symbol,
+                source           = req.source,
+                interval         = req.interval,
+                start_date       = req.start_date,
+                end_date         = req.end_date,
+                capital          = req.capital,
+                params           = json.dumps(_sanitize(strategy_params)),
+                total_return_pct = metrics["total_return_pct"],
+                sharpe_ratio     = metrics["sharpe_ratio"],
+                sortino_ratio    = metrics["sortino_ratio"],
+                max_drawdown_pct = metrics["max_drawdown_pct"],
+                win_rate         = metrics["win_rate"],
+                profit_factor    = metrics["profit_factor"] if metrics["profit_factor"] != float("inf") else 9999,
+                num_trades       = metrics["num_trades"],
+                regime_mix       = json.dumps(regime_mix) if regime_mix else None,
+            ))
+        except Exception as log_err:  # pragma: no cover - logging must not break runs
+            logger.warning("StrategyOutcome logging skipped: %s", log_err)
+
         job.status = "completed"
         db.commit()
 
         # Store full metrics (including curves) in memory cache for report gen
-        _cache[backtest_id] = {"metrics": metrics, "ohlcv": df, "params": strategy_params}
+        _cache_put(backtest_id, {"metrics": metrics, "ohlcv": df, "params": strategy_params})
 
         # ── Generate HTML report automatically ────────────────────────────────
         report_path = generate_report(
@@ -804,10 +914,34 @@ def run_backtest(req: BacktestRequest, db: Session = Depends(get_db)):
                     validation_data["validation_drawdowns"] = val_dd[1:]
 
 
+        # Surface "0 trades" causes instead of returning silent all-zero metrics
+        run_warnings: list[str] = []
+        if metrics["num_trades"] == 0:
+            buy_signals = int((signals_df["signal"] == "BUY").sum())
+            if buy_signals == 0:
+                run_warnings.append(
+                    "Strategy generated no BUY signals. Common causes: indicator "
+                    "length/EMA period >= number of candles (warmup never completes), "
+                    "rule conditions never satisfied, or GRID bounds outside the price range."
+                )
+            else:
+                run_warnings.append(
+                    f"{buy_signals} BUY signal(s) generated but no trades executed — "
+                    "check invest amount vs price/lot size and available capital."
+                )
+        eff_interval = df.attrs.get("effective_interval")
+        if eff_interval and eff_interval != req.interval:
+            run_warnings.append(
+                f"Data source substituted interval '{eff_interval}' for requested "
+                f"'{req.interval}' (provider history limits)."
+            )
+
         # Build response and sanitize ALL floats (inf/nan crash FastAPI's JSON encoder)
         return _sanitize({
             "backtest_id": backtest_id,
             "status":      "completed",
+            **({"warnings": run_warnings} if run_warnings else {}),
+            **({"effective_interval": eff_interval} if eff_interval else {}),
             "report_url":  f"/api/report/{backtest_id}",
             "report_file": str(report_path),
             "currency":    currency,
@@ -854,8 +988,12 @@ def run_backtest(req: BacktestRequest, db: Session = Depends(get_db)):
             **({"validation": validation_data} if validation_data is not None else {}),
         })
 
-    except HTTPException:
-        # Preserve 4xx guidance errors (e.g. 422 lot-size warning) — don't wrap as 500
+    except HTTPException as http_exc:
+        # Preserve 4xx guidance errors (e.g. 422 lot-size warning) — don't wrap
+        # as 500, but still close out the job row so it never sticks in "running".
+        job.status    = "error"
+        job.error_msg = str(getattr(http_exc, "detail", http_exc))[:500]
+        db.commit()
         raise
     except Exception as exc:
         job.status    = "error"
@@ -1138,22 +1276,8 @@ def run_stress(req: StressRequest, db: Session = Depends(get_db)):
     strategy_cls    = STRATEGY_REGISTRY[req.strategy.upper()]
     strategy_params = {**strategy_cls.default_params(), **req.params}
 
-    # Auto-compute GRID bounds when both are 0/equal OR when user bounds don't overlap the data
     if req.strategy.upper() == "GRID":
-        lo = float(strategy_params.get("lower_bound", 0) or 0)
-        hi = float(strategy_params.get("upper_bound", 0) or 0)
-        prices   = df["close"].astype(float)
-        lo_raw   = float(prices.min())
-        hi_raw   = float(prices.max())
-        if lo >= hi or lo > hi_raw or hi < lo_raw:
-            pad      = (hi_raw - lo_raw) * 0.10
-            strategy_params["lower_bound"] = _round_nice(max(1.0, lo_raw - pad), "floor")
-            strategy_params["upper_bound"] = _round_nice(hi_raw + pad, "ceil")
-            logger.info(
-                "GRID bounds auto-set: lower=%.2f upper=%.2f (from price range %.2f-%.2f)",
-                strategy_params["lower_bound"], strategy_params["upper_bound"],
-                lo_raw, hi_raw,
-            )
+        _ensure_grid_bounds(strategy_params, df)
 
     # ── Build simulator kwargs ────────────────────────────────────────────────
     auto_indian   = req.source in ("nse", "bse") or is_indian(req.symbol)
@@ -1215,12 +1339,12 @@ def run_stress(req: StressRequest, db: Session = Depends(get_db)):
             logger.warning("Walk-forward for stress failed (non-fatal): %s", exc)
 
     # ── Trade-level MC (optional, runs on baseline trades) ───────────────────
+    # run_stress_backtest exposes the baseline trade list so we don't have to
+    # re-run the baseline backtest just to recover it. Always pop (response hygiene).
+    _baseline_trades = result.pop("_baseline_trades", [])
     trade_mc_result: Optional[dict] = None
     if req.trade_mc_runs > 0:
-        baseline_trades = result.get("baseline", {}).get("trades", [])
-        # baseline dict has trades stripped; re-run baseline to get them
-        baseline_full = run_single_backtest(df, strategy_cls, strategy_params, sim_kwargs, req.capital)
-        baseline_trades = baseline_full.get("trades", [])
+        baseline_trades = _baseline_trades
         if baseline_trades:
             trade_mc_result = run_trade_mc(
                 trades         = baseline_trades,
@@ -1299,22 +1423,8 @@ async def stream_stress_sse(req: StressRequest, db: Session = Depends(get_db)):
     strategy_cls    = STRATEGY_REGISTRY[req.strategy.upper()]
     strategy_params = {**strategy_cls.default_params(), **req.params}
 
-    # Auto-compute GRID bounds when both are 0/equal OR when user bounds don't overlap the data
     if req.strategy.upper() == "GRID":
-        lo = float(strategy_params.get("lower_bound", 0) or 0)
-        hi = float(strategy_params.get("upper_bound", 0) or 0)
-        prices   = df["close"].astype(float)
-        lo_raw   = float(prices.min())
-        hi_raw   = float(prices.max())
-        if lo >= hi or lo > hi_raw or hi < lo_raw:
-            pad      = (hi_raw - lo_raw) * 0.10
-            strategy_params["lower_bound"] = _round_nice(max(1.0, lo_raw - pad), "floor")
-            strategy_params["upper_bound"] = _round_nice(hi_raw + pad, "ceil")
-            logger.info(
-                "GRID bounds auto-set: lower=%.2f upper=%.2f (from price range %.2f-%.2f)",
-                strategy_params["lower_bound"], strategy_params["upper_bound"],
-                lo_raw, hi_raw,
-            )
+        _ensure_grid_bounds(strategy_params, df)
 
     auto_indian = req.source in ("nse", "bse") or is_indian(req.symbol)
     use_indian  = req.use_indian_costs or auto_indian
@@ -1429,6 +1539,7 @@ async def stream_stress_sse(req: StressRequest, db: Session = Depends(get_db)):
 
             run_data = {
                 "run_idx":          i,
+                **({"error": m["error"]} if m.get("error") else {}),
                 "return_pct":       round(float(m.get("total_return_pct",     0.0)), 4),
                 "sharpe":           round(float(m.get("sharpe_ratio",         0.0)), 4),
                 "sortino":          round(float(m.get("sortino_ratio",        0.0)), 4),
@@ -1440,8 +1551,18 @@ async def stream_stress_sse(req: StressRequest, db: Session = Depends(get_db)):
                 "annualized_return":round(float(m.get("annualised_return_pct", 0.0)), 4),
             }
             per_run.append(run_data)
-            equity_curves.append(eq)
-            price_curves.append(perturbed_df["close"].tolist())
+            # For large MC counts keep only the ≤200-point subsample per run —
+            # 1000 full-resolution curves on intraday data is hundreds of MB.
+            # Aggregation (fan/spaghetti) subsamples to 200 points anyway.
+            if n_runs > 250:
+                equity_curves.append(eq_sub)
+                px = perturbed_df["close"].tolist()
+                px_idx = [round(j * (len(px) - 1) / max(min(len(px), 200) - 1, 1))
+                          for j in range(min(len(px), 200))]
+                price_curves.append([float(px[j]) for j in px_idx])
+            else:
+                equity_curves.append(eq)
+                price_curves.append(perturbed_df["close"].tolist())
 
             yield _ev({
                 "type":    "run",
@@ -1528,6 +1649,752 @@ async def stream_stress_sse(req: StressRequest, db: Session = Depends(get_db)):
             "Connection":       "keep-alive",
             "X-Accel-Buffering": "no",
         },
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ── AI Forward-Test endpoints (K1 — block-bootstrap / Kronos)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ForecastRequest(BaseModel):
+    # Dataset
+    symbol:           str   = Field("BTC/USDT")
+    source:           str   = Field("binance")
+    interval:         str   = Field("1d")
+    start_date:       date  = Field(...)
+    end_date:         date  = Field(...)
+    capital:          float = Field(DEFAULT_CAPITAL)
+    # Strategy
+    strategy:         str   = Field("DCA")
+    params:           dict  = Field(default_factory=dict)
+    # Simulator
+    fee_pct:          float = Field(DEFAULT_FEE_PERCENT)
+    slippage:         float = Field(DEFAULT_SLIPPAGE_PERCENT)
+    use_indian_costs: bool  = Field(False)
+    market_type:      str   = Field("equity_delivery")
+    brokerage_model:  str   = Field("flat")
+    brokerage_flat:   float = Field(20.0)
+    brokerage_pct:    float = Field(0.005)
+    # Forecast
+    horizon_days:     int          = Field(90,  description="Forward horizon in bars (same interval as historical)")
+    n_paths:          int          = Field(100, description="Number of synthetic paths")
+    seed:             Optional[int] = Field(None)
+    synthetic_intraday: bool       = Field(False)
+
+
+def _build_forecast_sim_kwargs(req: ForecastRequest, lot_sz: int, use_indian: bool) -> dict:
+    return dict(
+        symbol           = req.symbol,
+        fee_percent      = req.fee_pct,
+        slippage_percent = req.slippage,
+        use_indian_costs = use_indian,
+        market_type      = req.market_type,
+        brokerage_model  = req.brokerage_model,
+        brokerage_flat   = req.brokerage_flat,
+        brokerage_pct    = req.brokerage_pct,
+        lot_size         = lot_sz,
+    )
+
+
+def _prepare_forecast(req: ForecastRequest):
+    """Shared setup: fetch OHLCV, build strategy, build sim_kwargs."""
+    from engine.stress import StressScenario
+    if req.strategy.upper() not in STRATEGY_REGISTRY:
+        raise HTTPException(400, f"Unknown strategy '{req.strategy}'")
+
+    try:
+        start_dt = datetime.combine(req.start_date, datetime.min.time())
+        end_dt   = datetime.combine(req.end_date,   datetime.max.time())
+        df = fetcher.fetch(req.symbol, start_dt, end_dt, req.source, req.interval,
+                           req.synthetic_intraday)
+    except Exception as exc:
+        raise HTTPException(500, f"Data fetch failed: {exc}")
+    if df is None or df.empty:
+        raise HTTPException(422, "No data returned for the given symbol / date range.")
+
+    strategy_cls    = STRATEGY_REGISTRY[req.strategy.upper()]
+    strategy_params = {**strategy_cls.default_params(), **req.params}
+
+    if req.strategy.upper() == "GRID":
+        _ensure_grid_bounds(strategy_params, df)
+
+    auto_indian = req.source in ("nse", "bse") or is_indian(req.symbol)
+    use_indian  = req.use_indian_costs or auto_indian
+    lot_sz      = get_lot_size(req.symbol) if req.market_type in ("futures", "options") else 1
+    sim_kwargs  = _build_forecast_sim_kwargs(req, lot_sz, use_indian)
+
+    # Prepend a shared historical tail to each forward path so indicator
+    # strategies (EMA/RSI/etc.) are warmed up before the synthetic horizon
+    # starts. The stub is identical across paths, so path dispersion is
+    # unaffected; without it, a 90-bar path spends ~1/3 of its length in warmup.
+    dummy_scenario = StressScenario(
+        name="forward_test",
+        display_name=f"{req.horizon_days}d Forward ({req.n_paths} paths)",
+        shock_depth_pct=0.0,
+        shock_duration_days=req.horizon_days,
+        vol_multiplier=1.0,
+    )
+    return df, strategy_cls, strategy_params, sim_kwargs, dummy_scenario
+
+
+_FORECAST_WARMUP_BARS = 64
+
+def _with_warmup(df_hist: pd.DataFrame, path_df: pd.DataFrame) -> pd.DataFrame:
+    tail = df_hist.tail(min(_FORECAST_WARMUP_BARS, len(df_hist)))
+    return pd.concat([tail, path_df], ignore_index=True)
+
+
+@app.post(f"{API_PREFIX}/forecast/run", tags=["Forecast"])
+def run_forecast(req: ForecastRequest):
+    """
+    Run one backtest on the historical OHLCV (baseline), then generate N
+    synthetic forward paths via block-bootstrap (or Kronos when KRONOS_URL is set)
+    and run the strategy on each path.
+
+    Response shape is identical to /stress/run — frontend reuses StressResults.
+    """
+    from engine.forecast import generate_paths as _gen_paths
+
+    df, strategy_cls, strategy_params, sim_kwargs, dummy_scenario = _prepare_forecast(req)
+
+    n_paths = max(1, req.n_paths)
+    horizon = max(1, req.horizon_days)
+
+    baseline = run_single_backtest(df, strategy_cls, strategy_params, sim_kwargs, req.capital)
+
+    forward_paths   = _gen_paths(df, n_paths, horizon, seed=req.seed)
+    per_run:        list[dict]         = []
+    equity_curves:  list[list[float]]  = []
+    price_curves:   list[list[float]]  = []
+
+    for path_df in forward_paths:
+        m = run_single_backtest(_with_warmup(df, path_df), strategy_cls, strategy_params, sim_kwargs, req.capital)
+        per_run.append({
+            "return_pct":        m.get("total_return_pct",     0.0),
+            "sharpe":            m.get("sharpe_ratio",         0.0),
+            "sortino":           m.get("sortino_ratio",        0.0),
+            "calmar":            m.get("calmar_ratio",         0.0),
+            "max_dd_pct":        m.get("max_drawdown_pct",     0.0),
+            "win_rate":          m.get("win_rate",             0.0),
+            "num_trades":        m.get("num_trades",            0),
+            "final_equity":      m.get("final_equity",   req.capital),
+            "annualized_return": m.get("annualised_return_pct", 0.0),
+        })
+        equity_curves.append(m.get("equity_curve", [req.capital]))
+        price_curves.append(path_df["close"].tolist())
+
+    agg = aggregate_stress_results(
+        baseline, per_run, equity_curves, price_curves,
+        df, req.capital, dummy_scenario, 0.0,
+    )
+
+    return _sanitize({
+        "backtest_id": str(uuid.uuid4())[:8],
+        "symbol":      req.symbol,
+        "strategy":    req.strategy.upper(),
+        "forecast": {
+            "horizon_days": horizon,
+            "n_paths":      n_paths,
+            "method":       "kronos" if os.getenv("KRONOS_URL") else "block_bootstrap",
+        },
+        **agg,
+    })
+
+
+@app.post(f"{API_PREFIX}/forecast/stream", tags=["Forecast"])
+async def stream_forecast_sse(req: ForecastRequest):
+    """
+    SSE streaming forward-test.  Events mirror /stress/stream:
+      {type: "baseline", metrics: {...}, total: N}
+      {type: "run",      run_num: N, total: N, metrics: {...}, equity: [...]}
+      {type: "complete", result: {...}}
+      {type: "error",    message: "..."}
+    """
+    df, strategy_cls, strategy_params, sim_kwargs, dummy_scenario = await asyncio.to_thread(
+        _prepare_forecast, req
+    )
+
+    n_paths_  = max(1, req.n_paths)
+    horizon_  = max(1, req.horizon_days)
+    df_snap   = df.copy()
+    req_snap  = req
+
+    async def _generate():
+        def _ev(obj: dict) -> str:
+            return f"data: {json.dumps(_sanitize(obj))}\n\n"
+
+        # Baseline on historical data
+        try:
+            baseline = await asyncio.to_thread(
+                run_single_backtest,
+                df_snap, strategy_cls, strategy_params, sim_kwargs, req_snap.capital,
+            )
+        except Exception as exc:
+            yield _ev({"type": "error", "message": str(exc)})
+            return
+
+        safe_bl = {k: v for k, v in baseline.items()
+                   if k not in ("equity_curve", "drawdowns", "timestamps", "trades")}
+        yield _ev({"type": "baseline", "metrics": safe_bl, "total": n_paths_})
+
+        from engine.forecast import generate_one_path as _gen_one_path
+        from collections import Counter
+
+        per_run:       list[dict]         = []
+        equity_curves: list[list[float]]  = []
+        price_curves:  list[list[float]]  = []
+        regime_counter: Counter           = Counter()
+        profitable_count: int             = 0
+
+        for i in range(n_paths_):
+            # Generate one path and simulate — yields events as each path completes
+            # so the canvas builds up live (critical for Kronos on CPU which can
+            # take minutes for a 100-path batch call).
+            seed_i = (req_snap.seed + i) if req_snap.seed is not None else None
+            try:
+                path_df = await asyncio.to_thread(
+                    _gen_one_path, df_snap, horizon_, 20, seed_i,
+                )
+                m = await asyncio.to_thread(
+                    run_single_backtest,
+                    _with_warmup(df_snap, path_df), strategy_cls, strategy_params,
+                    sim_kwargs, req_snap.capital,
+                )
+            except Exception as exc:
+                logger.warning("Forward path %d failed (skipped): %s", i, exc)
+                continue
+
+            # Classify regime of this forward path
+            try:
+                path_regimes  = classify_regimes(path_df)
+                regime_counts = Counter(path_regimes)
+                path_regime   = regime_counts.most_common(1)[0][0] if regime_counts else "unknown"
+            except Exception:
+                path_regime = "unknown"
+            regime_counter[path_regime] += 1
+
+            eq     = m.get("equity_curve", [req_snap.capital])
+            n_ts   = min(len(eq), 200)
+            ts_idx = [round(j * (len(eq) - 1) / max(n_ts - 1, 1)) for j in range(n_ts)]
+            eq_sub = [round(float(eq[j]), 2) for j in ts_idx]
+
+            ret_pct = round(float(m.get("total_return_pct", 0.0)), 4)
+            if ret_pct > 0:
+                profitable_count += 1
+
+            run_data = {
+                "run_idx":          i,
+                "return_pct":       ret_pct,
+                "sharpe":           round(float(m.get("sharpe_ratio",         0.0)), 4),
+                "sortino":          round(float(m.get("sortino_ratio",        0.0)), 4),
+                "calmar":           round(float(m.get("calmar_ratio",         0.0)), 4),
+                "max_dd_pct":       round(float(m.get("max_drawdown_pct",     0.0)), 4),
+                "win_rate":         round(float(m.get("win_rate",             0.0)), 4),
+                "num_trades":       int(m.get("num_trades", 0)),
+                "final_equity":     round(float(m.get("final_equity", req_snap.capital)), 2),
+                "annualized_return":round(float(m.get("annualised_return_pct", 0.0)), 4),
+                "regime":           path_regime,
+            }
+            per_run.append(run_data)
+            equity_curves.append(eq)
+            price_curves.append(path_df["close"].tolist())
+
+            yield _ev({
+                "type":    "run",
+                "run_num": i + 1,
+                "total":   n_paths_,
+                "metrics": run_data,
+                "equity":  eq_sub,
+                "regime":  path_regime,
+            })
+
+        # Build price spaghetti: normalize each price path to % from its first price
+        price_spaghetti: list[dict] = []
+        if price_curves:
+            max_lines  = min(100, len(price_curves))
+            ref_len    = min(len(pc) for pc in price_curves)
+            n_ts       = min(ref_len, 200)
+            ts_idx_p   = [round(j * (ref_len - 1) / max(n_ts - 1, 1)) for j in range(n_ts)]
+            sample_idx = [round(j * (len(price_curves) - 1) / max(max_lines - 1, 1))
+                          for j in range(max_lines)]
+            for ri in sample_idx:
+                pc    = price_curves[ri]
+                p0    = float(pc[0]) if pc[0] != 0 else 1.0
+                pc_sub = [round((float(pc[j]) / p0 - 1) * 100, 3) for j in ts_idx_p if j < len(pc)]
+                price_spaghetti.append({
+                    "run_idx":    ri,
+                    "return_pct": per_run[ri]["return_pct"] if ri < len(per_run) else 0.0,
+                    "price_pct":  pc_sub,
+                })
+
+        # Regime distribution as % of paths
+        n_done = len(per_run)
+        regime_dist = {
+            "bull":     round(regime_counter.get("bull",     0) / max(n_done, 1) * 100, 1),
+            "bear":     round(regime_counter.get("bear",     0) / max(n_done, 1) * 100, 1),
+            "sideways": round(regime_counter.get("sideways", 0) / max(n_done, 1) * 100, 1),
+        }
+        forward_survival_pct = round(profitable_count / max(n_done, 1) * 100, 1)
+
+        try:
+            agg = await asyncio.to_thread(
+                aggregate_stress_results,
+                baseline, per_run, equity_curves, price_curves,
+                df_snap, req_snap.capital, dummy_scenario, 0.0,
+            )
+        except Exception as exc:
+            yield _ev({"type": "error", "message": f"Aggregation failed: {exc}"})
+            return
+
+        yield _ev({
+            "type": "complete",
+            "result": _sanitize({
+                "backtest_id": str(uuid.uuid4())[:8],
+                "symbol":      req_snap.symbol,
+                "strategy":    req_snap.strategy.upper(),
+                "forecast": {
+                    "horizon_days":        horizon_,
+                    "n_paths":             n_paths_,
+                    "method":              "kronos" if os.getenv("KRONOS_URL") else "block_bootstrap",
+                    "regime_distribution": regime_dist,
+                    "forward_survival_pct": forward_survival_pct,
+                },
+                "price_spaghetti": price_spaghetti,
+                **agg,
+            }),
+        })
+
+    return StreamingResponse(
+        _generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control":     "no-cache",
+            "Connection":        "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ── UC-2  Crisis Simulator: Kronos paths + stress scaffold ───────────────────
+
+class CrisisRequest(ForecastRequest):
+    scenario_key: str = Field("covid_crash", description="Key from SCENARIO_PRESETS")
+    severity:     float = Field(1.0, ge=0.1, le=3.0)
+
+
+@app.post(f"{API_PREFIX}/forecast/crisis/stream", tags=["Forecast"])
+async def stream_crisis_sse(req: CrisisRequest):
+    """
+    UC-2 Crisis Simulator (SSE).
+    Generates N forward price paths (Kronos or block-bootstrap), then overlays
+    a parametric stress scaffold on each path so the macro shock shape is
+    deterministic while the micro-structure is realistic.  Events mirror
+    /forecast/stream.
+    """
+    if req.scenario_key not in SCENARIO_PRESETS:
+        raise HTTPException(400, f"Unknown scenario '{req.scenario_key}'")
+
+    scenario = deepcopy(SCENARIO_PRESETS[req.scenario_key])
+    df, strategy_cls, strategy_params, sim_kwargs, _ = await asyncio.to_thread(
+        _prepare_forecast, req
+    )
+
+    n_paths_ = max(1, req.n_paths)
+    horizon_ = max(1, req.horizon_days)
+    df_snap  = df.copy()
+    req_snap = req
+    sev      = float(req.severity)
+
+    async def _gen_crisis():
+        def _ev(obj: dict) -> str:
+            return f"data: {json.dumps(_sanitize(obj))}\n\n"
+
+        try:
+            baseline = await asyncio.to_thread(
+                run_single_backtest,
+                df_snap, strategy_cls, strategy_params, sim_kwargs, req_snap.capital,
+            )
+        except Exception as exc:
+            yield _ev({"type": "error", "message": str(exc)})
+            return
+
+        safe_bl = {k: v for k, v in baseline.items()
+                   if k not in ("equity_curve", "drawdowns", "timestamps", "trades")}
+        yield _ev({"type": "baseline", "metrics": safe_bl, "total": n_paths_})
+
+        from engine.forecast import generate_one_path as _gen_one_path
+        from collections import Counter
+
+        per_run:       list[dict]        = []
+        equity_curves: list[list[float]] = []
+        price_curves:  list[list[float]] = []
+        regime_counter: Counter          = Counter()
+        profitable_count = 0
+
+        for i in range(n_paths_):
+            seed_i     = (req_snap.seed + i) if req_snap.seed is not None else i
+            run_sev    = sev * float(np.random.uniform(0.75, 1.25))
+            try:
+                raw_path = await asyncio.to_thread(
+                    _gen_one_path, df_snap, horizon_, 20, seed_i,
+                )
+                # Overlay stress scaffold on the generated path (UC-2 hybrid)
+                stressed_path = await asyncio.to_thread(
+                    apply_stress, raw_path, scenario, run_sev, seed_i,
+                )
+                m = await asyncio.to_thread(
+                    run_single_backtest,
+                    _with_warmup(df_snap, stressed_path), strategy_cls,
+                    strategy_params, sim_kwargs, req_snap.capital,
+                )
+            except Exception as exc:
+                logger.warning("Crisis path %d failed (skipped): %s", i, exc)
+                continue
+
+            try:
+                path_regimes = classify_regimes(stressed_path)
+                rc = Counter(path_regimes)
+                path_regime = rc.most_common(1)[0][0] if rc else "unknown"
+            except Exception:
+                path_regime = "unknown"
+            regime_counter[path_regime] += 1
+
+            eq     = m.get("equity_curve", [req_snap.capital])
+            n_ts   = min(len(eq), 200)
+            ts_idx = [round(j * (len(eq) - 1) / max(n_ts - 1, 1)) for j in range(n_ts)]
+            eq_sub = [round(float(eq[j]), 2) for j in ts_idx]
+
+            ret_pct = round(float(m.get("total_return_pct", 0.0)), 4)
+            if ret_pct > 0:
+                profitable_count += 1
+
+            run_data = {
+                "run_idx":          i,
+                "return_pct":       ret_pct,
+                "sharpe":           round(float(m.get("sharpe_ratio",         0.0)), 4),
+                "sortino":          round(float(m.get("sortino_ratio",        0.0)), 4),
+                "calmar":           round(float(m.get("calmar_ratio",         0.0)), 4),
+                "max_dd_pct":       round(float(m.get("max_drawdown_pct",     0.0)), 4),
+                "win_rate":         round(float(m.get("win_rate",             0.0)), 4),
+                "num_trades":       int(m.get("num_trades", 0)),
+                "final_equity":     round(float(m.get("final_equity", req_snap.capital)), 2),
+                "annualized_return":round(float(m.get("annualised_return_pct", 0.0)), 4),
+                "regime":           path_regime,
+            }
+            per_run.append(run_data)
+            equity_curves.append(eq)
+            price_curves.append(stressed_path["close"].tolist())
+
+            yield _ev({
+                "type": "run", "run_num": i + 1, "total": n_paths_,
+                "metrics": run_data, "equity": eq_sub, "regime": path_regime,
+            })
+
+        n_done = len(per_run)
+        regime_dist = {
+            "bull":     round(regime_counter.get("bull",     0) / max(n_done, 1) * 100, 1),
+            "bear":     round(regime_counter.get("bear",     0) / max(n_done, 1) * 100, 1),
+            "sideways": round(regime_counter.get("sideways", 0) / max(n_done, 1) * 100, 1),
+        }
+
+        dummy_sc = deepcopy(scenario)
+        try:
+            agg = await asyncio.to_thread(
+                aggregate_stress_results,
+                baseline, per_run, equity_curves, price_curves,
+                df_snap, req_snap.capital, dummy_sc, sev,
+            )
+        except Exception as exc:
+            yield _ev({"type": "error", "message": f"Aggregation failed: {exc}"})
+            return
+
+        yield _ev({
+            "type": "complete",
+            "result": _sanitize({
+                "backtest_id": str(uuid.uuid4())[:8],
+                "symbol":      req_snap.symbol,
+                "strategy":    req_snap.strategy.upper(),
+                "forecast": {
+                    "horizon_days":         horizon_,
+                    "n_paths":              n_paths_,
+                    "method":               "kronos" if os.getenv("KRONOS_URL") else "block_bootstrap",
+                    "mode":                 "crisis",
+                    "scenario_key":         req_snap.scenario_key,
+                    "scenario_display":     scenario.display_name,
+                    "severity":             sev,
+                    "regime_distribution":  regime_dist,
+                    "forward_survival_pct": round(profitable_count / max(n_done, 1) * 100, 1),
+                },
+                **agg,
+            }),
+        })
+
+    return StreamingResponse(
+        _gen_crisis(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
+
+
+# ── UC-7 Regime Forecast + Kronos-vs-Bootstrap comparison ────────────────────
+
+@app.post(f"{API_PREFIX}/forecast/compare", tags=["Forecast"])
+async def compare_forecast_methods(req: ForecastRequest):
+    """
+    UC-7 / Comparison: run the same forward test with BOTH block-bootstrap
+    and Kronos (if KRONOS_URL is set).  Returns a side-by-side summary so the
+    frontend can show how AI-generated paths differ from statistical ones.
+
+    Response: { kronos_available, bootstrap: summary, kronos: summary|null,
+                regime_forecast: {bull%, bear%, sideways%} }
+    """
+    from engine.forecast import (
+        _block_bootstrap_paths,
+        generate_one_path as _gen_one_path,
+        KRONOS_URL as _KURL,
+        KronosClient,
+    )
+    from collections import Counter
+
+    df, strategy_cls, strategy_params, sim_kwargs, dummy_scenario = await asyncio.to_thread(
+        _prepare_forecast, req
+    )
+
+    n_paths = max(1, min(req.n_paths, 50))  # cap at 50 for sync compare
+    horizon = max(1, req.horizon_days)
+
+    def _run_method(paths: list) -> dict:
+        """Run strategy on a list of paths and return aggregate summary."""
+        per_run, equity_curves, price_curves = [], [], []
+        rc: Counter = Counter()
+        for i, path_df in enumerate(paths):
+            try:
+                m = run_single_backtest(
+                    _with_warmup(df, path_df), strategy_cls, strategy_params,
+                    sim_kwargs, req.capital,
+                )
+            except Exception:
+                continue
+            try:
+                regime_labels = classify_regimes(path_df)
+                rc[Counter(regime_labels).most_common(1)[0][0]] += 1
+            except Exception:
+                pass
+            per_run.append({
+                "return_pct":  round(float(m.get("total_return_pct",  0.0)), 4),
+                "sharpe":      round(float(m.get("sharpe_ratio",      0.0)), 4),
+                "max_dd_pct":  round(float(m.get("max_drawdown_pct",  0.0)), 4),
+                "win_rate":    round(float(m.get("win_rate",          0.0)), 4),
+                "num_trades":  int(m.get("num_trades", 0)),
+                "final_equity":round(float(m.get("final_equity", req.capital)), 2),
+            })
+            equity_curves.append(m.get("equity_curve", [req.capital]))
+            price_curves.append(path_df["close"].tolist())
+
+        if not per_run:
+            return {}
+
+        returns = [r["return_pct"] for r in per_run]
+        sharpes = [r["sharpe"]     for r in per_run]
+        dds     = [r["max_dd_pct"] for r in per_run]
+        n = len(per_run)
+        return {
+            "n_paths":            n,
+            "return_pct":         {"p5": round(float(np.percentile(returns,  5)), 3),
+                                   "p50": round(float(np.percentile(returns, 50)), 3),
+                                   "p95": round(float(np.percentile(returns, 95)), 3)},
+            "sharpe":             {"p50": round(float(np.percentile(sharpes, 50)), 3)},
+            "max_dd_pct":         {"p50": round(float(np.percentile(dds,     50)), 3)},
+            "forward_survival_pct": round(sum(1 for r in returns if r > 0) / n * 100, 1),
+            "regime_distribution":  {
+                "bull":     round(rc.get("bull",     0) / n * 100, 1),
+                "bear":     round(rc.get("bear",     0) / n * 100, 1),
+                "sideways": round(rc.get("sideways", 0) / n * 100, 1),
+            },
+        }
+
+    # Always run bootstrap
+    bs_paths  = await asyncio.to_thread(_block_bootstrap_paths, df, n_paths, horizon, 20, req.seed)
+    bs_result = await asyncio.to_thread(_run_method, bs_paths)
+
+    # Kronos if available
+    kr_result = None
+    if _KURL:
+        try:
+            kr_paths  = await asyncio.to_thread(
+                KronosClient(_KURL).generate_paths, df, n_paths, horizon, req.seed,
+            )
+            kr_result = await asyncio.to_thread(_run_method, kr_paths)
+        except Exception as exc:
+            logger.warning("Kronos compare failed (bootstrap only): %s", exc)
+
+    return _sanitize({
+        "kronos_available": bool(_KURL and kr_result),
+        "bootstrap":        bs_result,
+        "kronos":           kr_result,
+        "n_paths":          n_paths,
+        "horizon_days":     horizon,
+    })
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ── UC-4  AI Paper Trading (bar-by-bar simulation on a single generated path)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class PaperRequest(ForecastRequest):
+    """Paper-trade request — same as ForecastRequest plus reveal speed control."""
+    reveal_ms: int = Field(300, ge=50, le=5000,
+                           description="Milliseconds between bar events (50–5000).")
+
+
+@app.post(f"{API_PREFIX}/forecast/paper/stream", tags=["Forecast"])
+async def stream_paper_trade(req: PaperRequest):
+    """
+    UC-4 AI Paper Trading (SSE).
+
+    Generates ONE synthetic forward path, runs the chosen strategy on it,
+    then streams each bar's candle + strategy decision bar-by-bar.
+
+    Events:
+      {type:"setup",  horizon, symbol, strategy, capital, method}
+      {type:"bar",    bar_idx, total, timestamp, candle:{o,h,l,c,v},
+                      signal, quantity, equity, cash,
+                      position_qty, position_value, trade?:{...}}
+      {type:"complete", metrics:{...}, trades:[...]}
+      {type:"error",  message}
+    """
+    df, strategy_cls, strategy_params, sim_kwargs, _ = await asyncio.to_thread(
+        _prepare_forecast, req
+    )
+
+    horizon_ = max(1, req.horizon_days)
+    reveal_s = float(req.reveal_ms) / 1000.0
+    df_snap  = df.copy()
+    req_snap = req
+
+    async def _gen_paper():
+        def _ev(obj: dict) -> str:
+            return f"data: {json.dumps(_sanitize(obj))}\n\n"
+
+        method = "kronos" if os.getenv("KRONOS_URL") else "block_bootstrap"
+
+        yield _ev({
+            "type": "setup",
+            "horizon":   horizon_,
+            "symbol":    req_snap.symbol,
+            "strategy":  req_snap.strategy.upper(),
+            "capital":   req_snap.capital,
+            "method":    method,
+        })
+
+        try:
+            from engine.forecast import generate_one_path as _gen_one_path
+            path_df = await asyncio.to_thread(
+                _gen_one_path, df_snap, horizon_, 20, req_snap.seed,
+            )
+            df_full = _with_warmup(df_snap, path_df)
+            warmup_len = len(df_full) - len(path_df)
+            result = await asyncio.to_thread(
+                run_single_backtest, df_full, strategy_cls, strategy_params,
+                sim_kwargs, req_snap.capital,
+            )
+        except Exception as exc:
+            yield _ev({"type": "error", "message": str(exc)})
+            return
+
+        equity_curve  = result.get("equity_curve", [])
+        timestamps    = result.get("timestamps", [])
+
+        # Get per-bar signals
+        try:
+            strat_instance = strategy_cls({**strategy_cls.default_params(), **strategy_params})
+            signals_df     = strat_instance.generate_signals(df_full)
+        except Exception:
+            signals_df = None
+
+        # Build trade timeline indexed by entry/exit timestamp strings
+        trade_log = result.get("trades", [])
+        trade_opened: dict[str, dict] = {}
+        trade_closed: dict[str, dict] = {}
+        for t in trade_log:
+            trade_opened[str(t.get("entry_time", ""))] = t
+            trade_closed[str(t.get("exit_time",  ""))] = t
+
+        # Track running position from signals (simpler than replaying trade list)
+        position_qty: float = 0.0
+
+        for bar_idx in range(len(path_df)):
+            full_idx = warmup_len + bar_idx
+            row      = df_full.iloc[full_idx]
+            ts_str   = timestamps[full_idx] if full_idx < len(timestamps) else str(row.get("timestamp", ""))
+            equity   = float(equity_curve[full_idx]) if full_idx < len(equity_curve) else req_snap.capital
+
+            signal   = "HOLD"
+            qty_sig  = 0.0
+            if signals_df is not None and full_idx < len(signals_df):
+                signal  = str(signals_df.iloc[full_idx].get("signal", "HOLD"))
+                qty_sig = float(signals_df.iloc[full_idx].get("quantity", 0.0))
+
+            price = float(row["close"])
+
+            # Update position tracking
+            if signal == "BUY" and qty_sig > 0:
+                position_qty += qty_sig
+            elif signal == "SELL":
+                position_qty = 0.0
+
+            position_value = round(position_qty * price, 4)
+            cash           = round(equity - position_value, 4)
+
+            # Find any trade record that opened or closed at this bar
+            opened_trade = trade_opened.get(ts_str)
+            closed_trade = trade_closed.get(ts_str)
+            trade_event  = closed_trade or opened_trade   # prefer closed (has full P&L)
+
+            bar_ev: dict = {
+                "type":    "bar",
+                "bar_idx": bar_idx,
+                "total":   len(path_df),
+                "timestamp": ts_str,
+                "candle": {
+                    "open":   round(float(row["open"]),   4),
+                    "high":   round(float(row["high"]),   4),
+                    "low":    round(float(row["low"]),    4),
+                    "close":  round(price,                4),
+                    "volume": round(float(row.get("volume", 0)), 2),
+                },
+                "signal":         signal,
+                "quantity":       round(qty_sig,       6),
+                "equity":         round(equity,        4),
+                "cash":           max(cash, 0.0),
+                "position_qty":   round(position_qty,  6),
+                "position_value": position_value,
+            }
+            if trade_event:
+                bar_ev["trade"] = trade_event
+
+            yield _ev(bar_ev)
+            await asyncio.sleep(reveal_s)
+
+        # Strip equity_curve / timestamps from metrics to keep event small
+        metrics = {k: v for k, v in result.items()
+                   if k not in ("equity_curve", "timestamps", "trades", "position", "cost_breakdown")}
+        yield _ev({
+            "type":    "complete",
+            "metrics": _sanitize(metrics),
+            "trades":  _sanitize(trade_log),
+            "forecast": {
+                "horizon_days": horizon_,
+                "method":       method,
+                "symbol":       req_snap.symbol,
+                "strategy":     req_snap.strategy.upper(),
+            },
+        })
+
+    return StreamingResponse(
+        _gen_paper(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
     )
 
 

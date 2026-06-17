@@ -288,9 +288,12 @@ def compute_wfe(wf_result: dict) -> Optional[float]:
         return None
     mean_is  = float(np.mean(is_sharpes))
     mean_oos = float(np.mean(oos_sharpes))
-    if mean_is <= 1e-6:
+    if mean_is <= 0.05:
+        # Near-zero IS Sharpe makes the ratio pure noise (e.g. 0.01 IS / 0.5 OOS
+        # → WFE 50 → fake "excellent" overfit score). Treat as not computable.
         return None
-    return round(mean_oos / mean_is, 4)
+    # Clamp: anything beyond [0, 2] is noise, and the score axis saturates at 1.0
+    return round(min(max(mean_oos / mean_is, 0.0), 2.0), 4)
 
 
 def _trs_interpretation(score: float, provisional: bool) -> str:
@@ -340,6 +343,18 @@ def run_trade_mc(
     pnls    = np.array([float(t.get("pnl", 0.0)) for t in trades])
     is_win  = pnls > 0
 
+    # Estimate actual trades/year from the trade timestamps so the Sharpe
+    # annualisation reflects this strategy's real frequency (a fixed 252
+    # wildly inflates Sharpe for a 10-trades-per-year strategy).
+    trades_per_yr = 252.0
+    try:
+        t0 = pd.Timestamp(trades[0].get("entry_time"))
+        t1 = pd.Timestamp(trades[-1].get("exit_time"))
+        span_days = max((t1 - t0).total_seconds() / 86_400.0, 1.0)
+        trades_per_yr = max(1.0, len(trades) / span_days * 365.0)
+    except Exception:
+        pass
+
     per_run: list[dict] = []
 
     for _ in range(n_runs):
@@ -370,8 +385,6 @@ def run_trade_mc(
         trade_rets  = run_pnls / capital if capital > 0 else run_pnls
         mean_tr     = float(np.mean(trade_rets))
         std_tr      = float(np.std(trade_rets))
-        # Annualise assuming 252 trading days, scaling by average trades/year
-        trades_per_yr = 252.0
         sharpe = (mean_tr / std_tr * np.sqrt(trades_per_yr)) if std_tr > 1e-10 else 0.0
 
         per_run.append({
@@ -565,6 +578,11 @@ def _apply_chop(df: pd.DataFrame, start: int, end: int,
     if mean_revert:
         for i in range(1, n):
             returns[i] -= 0.5 * returns[i - 1]
+        # The AR(-0.5) filter changes the variance; rescale so realized vol
+        # matches the declared noise_pct.
+        std = float(np.std(returns))
+        if std > 1e-12:
+            returns *= (noise_pct / 100) / std
     factors = np.exp(returns)
     for col in ("open", "high", "low", "close"):
         if col not in df.columns:
@@ -802,11 +820,16 @@ def _single_backtest(
         )
     except Exception as exc:
         logger.warning("Stress _single_backtest failed: %s", exc)
+        # Carry the error so callers can report failed runs instead of silently
+        # presenting an all-zero result as a valid backtest.
         return {
             "total_return_pct": 0.0, "sharpe_ratio": 0.0,
-            "sortino_ratio": 0.0, "max_drawdown_pct": 0.0,
+            "sortino_ratio": 0.0, "calmar_ratio": 0.0,
+            "max_drawdown_pct": 0.0, "annualised_return_pct": 0.0,
             "win_rate": 0.0, "num_trades": 0,
+            "final_equity": capital,
             "equity_curve": [capital],
+            "error": str(exc),
         }
 
 
@@ -898,6 +921,7 @@ def run_stress_backtest(
         m = _single_backtest(perturbed_df, strategy_cls, strategy_params,
                              stressed_sim_kw, capital)
         per_run.append({
+            **({"error": m["error"]} if m.get("error") else {}),
             "return_pct":        m.get("total_return_pct",     0.0),
             "sharpe":            m.get("sharpe_ratio",         0.0),
             "sortino":           m.get("sortino_ratio",        0.0),
@@ -1003,7 +1027,15 @@ def run_stress_backtest(
             "regime_vol_scales": {k: round(v, 4) for k, v in regime_vol_scales.items()},
         }
 
+    failed_runs = sum(1 for r in per_run if r.get("error"))
+    if failed_runs:
+        logger.warning("Stress MC: %d/%d runs failed — results are partial", failed_runs, n_runs)
+
     result: dict = {
+        "failed_runs": failed_runs,
+        **({"baseline_error": baseline["error"]} if baseline.get("error") else {}),
+        # Baseline trades for trade-level MC (caller pops this; not part of the response)
+        "_baseline_trades": baseline.get("trades", []),
         "scenario": {
             "name":         scenario.name,
             "display_name": getattr(scenario, "display_name", scenario.name),
@@ -1065,6 +1097,7 @@ def aggregate_stress_results(
     n_runs = len(per_run)
     if n_runs == 0:
         return {}
+    failed_runs = sum(1 for r in per_run if r.get("error"))
 
     returns = np.array([r["return_pct"] for r in per_run])
     p50_val = float(np.median(returns))
@@ -1140,6 +1173,8 @@ def aggregate_stress_results(
     robustness = compute_robustness_score(baseline, mc_result, capital)
 
     return {
+        "failed_runs": failed_runs,
+        **({"baseline_error": baseline["error"]} if baseline.get("error") else {}),
         "scenario": {
             "name":         scenario.name,
             "display_name": getattr(scenario, "display_name", scenario.name),

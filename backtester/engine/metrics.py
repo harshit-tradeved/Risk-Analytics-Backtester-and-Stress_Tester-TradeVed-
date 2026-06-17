@@ -160,7 +160,7 @@ def _trade_statistics(trades: list[dict]) -> dict:
     pnls      = [t["pnl"]     for t in trades]
     pnl_pcts  = [t["pnl_pct"] for t in trades]
     winners   = [p for p in pnls if p > 0]
-    losers    = [p for p in pnls if p <= 0]
+    losers    = [p for p in pnls if p < 0]   # zero-PnL trades are neither wins nor losses
 
     gross_profit = sum(winners)
     gross_loss   = abs(sum(losers))
@@ -211,7 +211,10 @@ def _candles_per_day(timestamps: list) -> float:
         ts = [pd.Timestamp(t) for t in timestamps[:50]]
         diffs = [(ts[i + 1] - ts[i]).total_seconds() for i in range(len(ts) - 1)]
         median_sec = float(np.median(diffs))
-        return max(1.0, 86_400 / median_sec)
+        # Allow fractional candles-per-day so weekly (1/7) and monthly (~1/30)
+        # data annualise correctly; the old max(1.0, …) floor inflated weekly
+        # Sharpe by ~sqrt(7). Floor at monthly to bound pathological gaps.
+        return max(1.0 / 31.0, 86_400 / median_sec)
     except Exception:
         return 1.0
 

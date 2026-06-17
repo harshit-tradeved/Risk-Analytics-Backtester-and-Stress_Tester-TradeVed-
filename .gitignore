@@ -25,6 +25,18 @@ dist/
 logs/
 reports/
 optimizer_results/
+comprehensive_reports/
+
+# Presentation files
+*.pptx
+
+# Kronos model repo (cloned on-demand by kronos_service/setup.py)
+kronos_service/Kronos/
+
+# PPT utility scripts (not part of the product)
+add_kronos_slides.py
+build_week3_ppt.py
+WEEK2_REPORT.md
 
 # Large binary / model files
 *.pkl

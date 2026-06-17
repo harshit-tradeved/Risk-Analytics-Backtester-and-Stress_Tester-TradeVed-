@@ -112,7 +112,10 @@ def _wf_grid(strategy: str, lower: float = 0, upper: float = 0, capital: float =
                     })
         return rows  # 18 combos
 
-    return []
+    # Indicator presets / CUSTOM: no optimisation grid defined — evaluate the
+    # user's own params per window so walk-forward (and WFE) still works instead
+    # of silently returning zero windows.
+    return [dict(user_params or {})]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -140,7 +143,8 @@ def _segment_metrics(
             if lo >= hi or lo > hi_raw or hi < lo_raw:
                 pad = (hi_raw - lo_raw) * 0.10
                 strategy_params = dict(strategy_params)
-                strategy_params["lower_bound"] = max(1.0, lo_raw - pad)
+                # No absolute 1.0 clamp — it inverted bounds for sub-$1 assets
+                strategy_params["lower_bound"] = max(lo_raw * 0.5, lo_raw - pad)
                 strategy_params["upper_bound"] = hi_raw + pad
 
         strat   = strategy_cls(**{**strategy_cls.default_params(), **strategy_params})
@@ -213,7 +217,7 @@ def run_holdout(
         lo_raw, hi_raw = float(prices.min()), float(prices.max())
         if lo >= hi or lo > hi_raw or hi < lo_raw:
             pad = (hi_raw - lo_raw) * 0.10
-            train_params["lower_bound"] = max(1.0, lo_raw - pad)
+            train_params["lower_bound"] = max(lo_raw * 0.5, lo_raw - pad)
             train_params["upper_bound"] = hi_raw + pad
 
     strategy_cls = STRATEGY_REGISTRY[strategy_name]
@@ -261,6 +265,10 @@ def run_holdout(
         "in_sample":     {**in_clean,  "num_candles": len(df_train)},
         "out_of_sample": {**out_clean, "num_candles": len(df_test)},
         "verdict":       verdict,
+        # The stitched chart ratio-scales the OOS segment to continue from the
+        # IS final equity; per-segment metrics above use the unscaled curves
+        # (each segment is traded from initial capital).
+        "validation_curve_note": "OOS segment ratio-scaled for chart continuity; metrics use unscaled per-segment curves.",
         "validation_equity_curve": stitched_eq,
         "validation_timestamps": stitched_ts,
         "validation_drawdowns": stitched_dd,
@@ -375,7 +383,7 @@ def run_walk_forward(
             prices  = df_train["close"].astype(float)
             lo_raw, hi_raw = float(prices.min()), float(prices.max())
             pad = (hi_raw - lo_raw) * 0.10
-            lo  = max(1.0, lo_raw - pad)
+            lo  = max(lo_raw * 0.5, lo_raw - pad)
             hi  = hi_raw + pad
 
         combos = _wf_grid(strategy_name, lower=lo, upper=hi, capital=capital, user_params=strategy_params)
@@ -496,6 +504,7 @@ def run_walk_forward(
         "num_windows":   len(windows_out),
         "windows":       windows_out,
         "out_of_sample": agg_clean,
+        "validation_curve_note": "OOS segments ratio-scaled for chart continuity; metrics use unscaled per-segment curves.",
         "validation_equity_curve": val_eq,
         "validation_timestamps": val_ts,
         "validation_drawdowns": val_dd,

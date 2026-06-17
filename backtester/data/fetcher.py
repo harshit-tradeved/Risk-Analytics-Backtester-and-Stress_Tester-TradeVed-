@@ -426,6 +426,14 @@ class YFinanceFetcher:
         df.sort_values("timestamp", inplace=True)
         df.reset_index(drop=True, inplace=True)
 
+        # Surface interval substitutions (4h→1h, range-clamped 15m→1h/1d) so
+        # callers can warn the user instead of silently mislabeling results.
+        _rev = {"1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m",
+                "1h": "1h", "1d": "1d", "1wk": "1w"}
+        eff = _rev.get(yf_interval, yf_interval)
+        if eff != interval:
+            df.attrs["effective_interval"] = eff
+
         logger.info("yfinance: fetched %d candles for %s", len(df), symbol)
         return df
 

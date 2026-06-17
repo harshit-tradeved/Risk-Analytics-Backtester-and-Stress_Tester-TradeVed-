@@ -40,6 +40,7 @@ class Position:
     avg_price:   float
     entry_time:  datetime
     entry_price: float      # price at first fill (not average)
+    buy_fees:    float = 0.0  # accumulated entry-side costs, prorated into trade PnL on exit
 
     @property
     def total_cost(self) -> float:
@@ -160,12 +161,17 @@ class TradeSimulator:
             if self.lot_size > 1 and qty > 0:
                 qty = math.floor(qty / self.lot_size) * self.lot_size
                 if qty <= 0:
-                    # Requested quantity is below the minimum lot size — track and skip
-                    if sig == "BUY":
-                        self._lot_size_skips += 1
-                    self._equity_curve.append(self._mark_equity(price))
-                    self._timestamps.append(ts)
-                    continue
+                    # Sub-lot SELL while holding ≥1 lot: trade the minimum lot
+                    # instead of silently stranding the position until force-close.
+                    if sig == "SELL" and self._position and self._position.quantity >= self.lot_size:
+                        qty = float(self.lot_size)
+                    else:
+                        # Requested quantity is below the minimum lot size — track and skip
+                        if sig == "BUY":
+                            self._lot_size_skips += 1
+                        self._equity_curve.append(self._mark_equity(price))
+                        self._timestamps.append(ts)
+                        continue
 
             if sig == "BUY" and qty > 0:
                 self._execute_buy(price, qty, ts)
@@ -183,6 +189,10 @@ class TradeSimulator:
                 self._position.quantity,
                 last_row["timestamp"],
             )
+            # The last equity point was marked before this forced close; replace
+            # it with realized cash so final equity is net of exit fees/slippage.
+            if self._position is None and self._equity_curve:
+                self._equity_curve[-1] = round(self._cash, 4)
 
         return {
             "equity_curve":       self._equity_curve,
@@ -257,6 +267,10 @@ class TradeSimulator:
                 total_cost = cost + fee
             else:
                 quantity   = self._cash / (actual_price * (1 + self.fee_percent))
+                if self.lot_size > 1:
+                    quantity = math.floor(quantity / self.lot_size) * self.lot_size
+                    if quantity <= 0:
+                        return 0.0
                 cost       = quantity * actual_price
                 fee        = self._calculate_cost(cost, "BUY", track=True)   # final qty — track it
                 total_cost = cost + fee
@@ -274,8 +288,10 @@ class TradeSimulator:
                 avg_price   = actual_price,
                 entry_time  = timestamp,
                 entry_price = actual_price,
+                buy_fees    = fee,
             )
         else:
+            self._position.buy_fees += fee
             # Weighted-average cost basis (WACB)
             old_qty = self._position.quantity
             old_avg = self._position.avg_price
@@ -299,12 +315,13 @@ class TradeSimulator:
         fee          = self._calculate_cost(proceeds, "SELL")
         net_proceeds = proceeds - fee
 
-        # P&L calculation:
-        # gross PnL = (exit - entry) × qty
-        # net PnL   = gross PnL - total round-trip cost on this portion
-        # For Indian costs, the BUY fee was already deducted from cash at entry;
-        # here we deduct the SELL fee from proceeds.
-        pnl     = (actual_price - self._position.avg_price) * quantity - fee
+        # P&L = (exit - entry) × qty - sell fee - prorated share of the buy
+        # fees for this portion. Cash already absorbed buy fees at entry; the
+        # proration only affects the per-trade PnL/win-rate accounting.
+        pos_qty_before = self._position.quantity
+        buy_fee_part   = (self._position.buy_fees * (quantity / pos_qty_before)
+                          if pos_qty_before > 0 else 0.0)
+        pnl     = (actual_price - self._position.avg_price) * quantity - fee - buy_fee_part
         pnl_pct = (pnl / (self._position.avg_price * quantity)
                    if self._position.avg_price > 0 else 0.0)
 
@@ -316,12 +333,13 @@ class TradeSimulator:
             quantity    = quantity,
             pnl         = pnl,
             pnl_pct     = pnl_pct,
-            fees        = fee,   # sell-side fee only (buy fee already subtracted)
+            fees        = fee + buy_fee_part,   # full round-trip cost on this portion
         ))
 
         self._cash       += net_proceeds
         self._total_fees += fee
 
+        self._position.buy_fees -= buy_fee_part
         self._position.quantity -= quantity
         if self._position.quantity <= 1e-10:
             self._position = None

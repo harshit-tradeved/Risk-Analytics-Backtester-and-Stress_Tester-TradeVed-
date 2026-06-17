@@ -23,13 +23,30 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from strategies.base import BaseStrategy
+from strategies.base import BaseStrategy, Param
 
 logger = logging.getLogger(__name__)
 
 
 class GridStrategy(BaseStrategy):
     """Grid strategy: buy dips and sell rallies within a defined price range."""
+
+    CATEGORY = "classic"
+
+    @classmethod
+    def param_schema(cls) -> dict[str, Any]:
+        return {
+            "lower_bound":          Param("number", "Lower Bound", min=0, group="Bounds",
+                                          help="Bottom of grid range (auto-detected if 0)."),
+            "upper_bound":          Param("number", "Upper Bound", min=0, group="Bounds",
+                                          help="Top of grid range (auto-detected if 0)."),
+            "num_levels":           Param("number", "Grid Levels", min=2, max=50, step=1, group="Bounds"),
+            "spacing":              Param("select", "Spacing", options=["linear", "exponential"], group="Bounds"),
+            "invest_per_level_usd": Param("number", "Invest / Level (USD)", min=0, step=50, group="Sizing",
+                                          help="Set 0 to use fixed units instead."),
+            "quantity_per_level":   Param("number", "Units / Level", min=0, step=0.001, group="Sizing",
+                                          depends_on={"field": "invest_per_level_usd", "value": 0}),
+        }
 
     @staticmethod
     def default_params() -> dict[str, Any]:

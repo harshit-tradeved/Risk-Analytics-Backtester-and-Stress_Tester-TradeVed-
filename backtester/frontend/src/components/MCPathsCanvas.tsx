@@ -15,7 +15,7 @@
  *  - Live / incremental drawing: new runs are appended without full redraw
  */
 import React, {
-  useRef, useEffect, useCallback, useMemo, useState,
+  useRef, useEffect, useLayoutEffect, useCallback, useMemo, useState,
 } from 'react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -270,6 +270,21 @@ export default function MCPathsCanvas({
     drawBaseline(ctx, W, H);
     ctx.restore();
   }, [displayRuns, height, drawAxes, drawRun, drawBaseline]);
+
+  // ── Initial sizing (synchronous, before any draw calls) ────────────────────
+  useLayoutEffect(() => {
+    const el  = containerRef.current;
+    const canvas = canvasRef.current;
+    if (!el || !canvas) return;
+    const W   = el.clientWidth || 800;
+    const dpr = window.devicePixelRatio || 1;
+    widthRef.current   = W;
+    canvas.width       = W   * dpr;
+    canvas.height      = height * dpr;
+    canvas.style.width  = `${W}px`;
+    canvas.style.height = `${height}px`;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Resize observer ─────────────────────────────────────────────────────────
   useEffect(() => {
