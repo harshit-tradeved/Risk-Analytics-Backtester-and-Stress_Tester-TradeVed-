@@ -355,10 +355,11 @@ export async function runForwardTest(form: ForecastFormState): Promise<ForecastR
 export function streamForwardTest(
   form: ForecastFormState,
   callbacks: {
-    onBaseline?: (metrics: Record<string, number>, total?: number) => void;
-    onRun?:      (runNum: number, total: number, run: StreamRun) => void;
-    onComplete?: (result: ForecastResponse) => void;
-    onError?:    (msg: string) => void;
+    onBaseline?:     (metrics: Record<string, number>, total?: number) => void;
+    onFetchingPaths?: (total: number) => void;
+    onRun?:          (runNum: number, total: number, run: StreamRun) => void;
+    onComplete?:     (result: ForecastResponse) => void;
+    onError?:        (msg: string) => void;
   },
 ): () => void {
   const ctrl = new AbortController();
@@ -399,6 +400,8 @@ export function streamForwardTest(
             };
             if (ev.type === 'baseline')
               callbacks.onBaseline?.(ev.metrics ?? {}, ev.total);
+            else if (ev.type === 'fetching_paths')
+              callbacks.onFetchingPaths?.(ev.total ?? 0);
             else if (ev.type === 'run')
               callbacks.onRun?.(ev.run_num!, ev.total!, { ...ev.metrics, equity: ev.equity ?? [] } as StreamRun);
             else if (ev.type === 'complete')
@@ -426,10 +429,11 @@ export function streamCrisisTest(
   scenarioKey: string,
   severity: number,
   callbacks: {
-    onBaseline?: (metrics: Record<string, number>, total?: number) => void;
-    onRun?:      (runNum: number, total: number, run: StreamRun & { regime?: string }) => void;
-    onComplete?: (result: ForecastResponse) => void;
-    onError?:    (msg: string) => void;
+    onBaseline?:     (metrics: Record<string, number>, total?: number) => void;
+    onFetchingPaths?: (total: number) => void;
+    onRun?:          (runNum: number, total: number, run: StreamRun & { regime?: string }) => void;
+    onComplete?:     (result: ForecastResponse) => void;
+    onError?:        (msg: string) => void;
   },
 ): () => void {
   const ctrl = new AbortController();
@@ -464,6 +468,7 @@ export function streamCrisisTest(
               result?: ForecastResponse; message?: string;
             };
             if (ev.type === 'baseline') callbacks.onBaseline?.(ev.metrics ?? {}, ev.total);
+            else if (ev.type === 'fetching_paths') callbacks.onFetchingPaths?.(ev.total ?? 0);
             else if (ev.type === 'run')
               callbacks.onRun?.(ev.run_num!, ev.total!, {
                 ...ev.metrics, equity: ev.equity ?? [], regime: ev.regime,

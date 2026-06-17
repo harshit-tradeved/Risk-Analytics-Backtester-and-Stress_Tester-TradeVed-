@@ -1838,7 +1838,7 @@ async def stream_forecast_sse(req: ForecastRequest):
                    if k not in ("equity_curve", "drawdowns", "timestamps", "trades")}
         yield _ev({"type": "baseline", "metrics": safe_bl, "total": n_paths_})
 
-        from engine.forecast import generate_one_path as _gen_one_path
+        from engine.forecast import generate_paths as _gen_paths
         from collections import Counter
 
         per_run:       list[dict]         = []
@@ -1847,15 +1847,18 @@ async def stream_forecast_sse(req: ForecastRequest):
         regime_counter: Counter           = Counter()
         profitable_count: int             = 0
 
-        for i in range(n_paths_):
-            # Generate one path and simulate — yields events as each path completes
-            # so the canvas builds up live (critical for Kronos on CPU which can
-            # take minutes for a 100-path batch call).
-            seed_i = (req_snap.seed + i) if req_snap.seed is not None else None
+        # Batch-generate all paths in one Kronos call (1 HTTP round-trip instead of N)
+        yield _ev({"type": "fetching_paths", "total": n_paths_})
+        try:
+            all_paths = await asyncio.to_thread(
+                _gen_paths, df_snap, n_paths_, horizon_, 20, req_snap.seed,
+            )
+        except Exception as exc:
+            yield _ev({"type": "error", "message": f"Path generation failed: {exc}"})
+            return
+
+        for i, path_df in enumerate(all_paths):
             try:
-                path_df = await asyncio.to_thread(
-                    _gen_one_path, df_snap, horizon_, 20, seed_i,
-                )
                 m = await asyncio.to_thread(
                     run_single_backtest,
                     _with_warmup(df_snap, path_df), strategy_cls, strategy_params,
@@ -2023,7 +2026,7 @@ async def stream_crisis_sse(req: CrisisRequest):
                    if k not in ("equity_curve", "drawdowns", "timestamps", "trades")}
         yield _ev({"type": "baseline", "metrics": safe_bl, "total": n_paths_})
 
-        from engine.forecast import generate_one_path as _gen_one_path
+        from engine.forecast import generate_paths as _gen_paths
         from collections import Counter
 
         per_run:       list[dict]        = []
@@ -2032,13 +2035,20 @@ async def stream_crisis_sse(req: CrisisRequest):
         regime_counter: Counter          = Counter()
         profitable_count = 0
 
-        for i in range(n_paths_):
+        # Batch-generate all raw paths in one Kronos call, then apply stress per-path
+        yield _ev({"type": "fetching_paths", "total": n_paths_})
+        try:
+            all_raw_paths = await asyncio.to_thread(
+                _gen_paths, df_snap, n_paths_, horizon_, 20, req_snap.seed,
+            )
+        except Exception as exc:
+            yield _ev({"type": "error", "message": f"Path generation failed: {exc}"})
+            return
+
+        for i, raw_path in enumerate(all_raw_paths):
             seed_i  = (req_snap.seed + i) if req_snap.seed is not None else i
             run_sev = sev * (0.75 + random.random() * 0.5)
             try:
-                raw_path = await asyncio.to_thread(
-                    _gen_one_path, df_snap, horizon_, 20, seed_i,
-                )
                 # Overlay stress scaffold on the generated path (UC-2 hybrid)
                 stressed_path = await asyncio.to_thread(
                     apply_stress, raw_path, scenario, run_sev, seed_i,

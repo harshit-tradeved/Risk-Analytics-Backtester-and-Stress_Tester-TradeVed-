@@ -11,15 +11,16 @@ type SubMode = 'forward' | 'crisis' | 'paper';
 // ─── Live state ───────────────────────────────────────────────────────────────
 
 interface LiveState {
-  runsDone:     number;
-  total:        number;
-  liveRuns:     MCRun[];
-  latestReturn: number | null;
-  latestSharpe: number | null;
-  bestReturn:   number;
-  worstReturn:  number;
-  baselineRet:  number | null;
-  regimeCounts: { bull: number; bear: number; sideways: number };
+  runsDone:      number;
+  total:         number;
+  liveRuns:      MCRun[];
+  latestReturn:  number | null;
+  latestSharpe:  number | null;
+  bestReturn:    number;
+  worstReturn:   number;
+  baselineRet:   number | null;
+  regimeCounts:  { bull: number; bear: number; sideways: number };
+  fetchingPaths: boolean;
 }
 
 const EMPTY_LIVE: LiveState = {
@@ -27,6 +28,7 @@ const EMPTY_LIVE: LiveState = {
   latestReturn: null, latestSharpe: null,
   bestReturn: -Infinity, worstReturn: Infinity, baselineRet: null,
   regimeCounts: { bull: 0, bear: 0, sideways: 0 },
+  fetchingPaths: false,
 };
 
 // ── Progress bar ──────────────────────────────────────────────────────────────
@@ -73,7 +75,7 @@ function LiveLoadingView({
   crisis:        boolean;
   scenarioLabel?: string;
 }) {
-  const { runsDone, total, liveRuns, latestReturn, latestSharpe, bestReturn, worstReturn, baselineRet, regimeCounts } = live;
+  const { runsDone, total, liveRuns, latestReturn, latestSharpe, bestReturn, worstReturn, baselineRet, regimeCounts, fetchingPaths } = live;
   const hasRuns  = liveRuns.length > 0;
   const tsIndices = Array.from({ length: hasRuns ? liveRuns[0].equity.length : 0 }, (_, i) => i);
 
@@ -163,7 +165,11 @@ function LiveLoadingView({
                   style={{ animationDelay: `${i * 0.15}s` }} />
               ))}
             </div>
-            <p className="text-sm font-medium">Fetching historical data &amp; computing baseline…</p>
+            <p className="text-sm font-medium">
+              {fetchingPaths
+                ? 'Generating paths on Kronos GPU — this takes ~15s…'
+                : 'Fetching historical data & computing baseline…'}
+            </p>
           </div>
         )}
       </div>
@@ -232,6 +238,13 @@ export default function ForwardTestPage() {
       });
     };
 
+    const onFetchingPaths = (total: number) => {
+      setPageState(prev => {
+        if (prev.kind !== 'live') return prev;
+        return { kind: 'live', live: { ...prev.live, fetchingPaths: true, total } };
+      });
+    };
+
     const onRun = (runNum: number, total: number, run: StreamRun & { regime?: string }) => {
       const mcRun: MCRun = {
         run_idx:    run.run_idx,
@@ -250,15 +263,16 @@ export default function ForwardTestPage() {
         return {
           kind: 'live',
           live: {
-            runsDone:     runNum,
+            runsDone:      runNum,
             total,
-            liveRuns:     [...l.liveRuns, mcRun],
-            latestReturn: run.return_pct,
-            latestSharpe: run.sharpe,
-            bestReturn:   Math.max(l.bestReturn,  run.return_pct),
-            worstReturn:  Math.min(l.worstReturn, run.return_pct),
-            baselineRet:  l.baselineRet,
-            regimeCounts: newCounts,
+            liveRuns:      [...l.liveRuns, mcRun],
+            latestReturn:  run.return_pct,
+            latestSharpe:  run.sharpe,
+            bestReturn:    Math.max(l.bestReturn,  run.return_pct),
+            worstReturn:   Math.min(l.worstReturn, run.return_pct),
+            baselineRet:   l.baselineRet,
+            regimeCounts:  newCounts,
+            fetchingPaths: false,
           },
         };
       });
@@ -273,8 +287,8 @@ export default function ForwardTestPage() {
     };
 
     const cleanup = crisisMode
-      ? streamCrisisTest(form, crisisScenario, severity, { onBaseline, onRun, onComplete, onError })
-      : streamForwardTest(form, { onBaseline, onRun, onComplete, onError });
+      ? streamCrisisTest(form, crisisScenario, severity, { onBaseline, onFetchingPaths, onRun, onComplete, onError })
+      : streamForwardTest(form, { onBaseline, onFetchingPaths, onRun, onComplete, onError });
 
     cleanupRef.current = cleanup;
   }, [form, crisisMode, crisisScenario, severity]);
