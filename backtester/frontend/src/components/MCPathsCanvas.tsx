@@ -41,6 +41,8 @@ interface Props {
   /** When true, skip the "draw all at once" flash — runs were appended incrementally */
   isLive?:        boolean;
   totalExpected?: number;        // for progress label
+  /** Crisis / dark-mode: dark background, warm path colours, dark tooltip */
+  darkMode?:      boolean;
 }
 
 // ─── Color helpers ────────────────────────────────────────────────────────────
@@ -63,7 +65,7 @@ const PAD = { top: 24, right: 16, bottom: 36, left: 72 };
 
 export default function MCPathsCanvas({
   runs, baselineEquity, timestamps, tsIndices, capital,
-  currency, locale, height = 400, isLive = false, totalExpected,
+  currency, locale, height = 400, isLive = false, totalExpected, darkMode = false,
 }: Props) {
   const canvasRef     = useRef<HTMLCanvasElement>(null);
   const containerRef  = useRef<HTMLDivElement>(null);
@@ -122,17 +124,18 @@ export default function MCPathsCanvas({
 
   // ── Draw axes + grid (called once per full redraw) ──────────────────────────
   const drawAxes = useCallback((ctx: CanvasRenderingContext2D, W: number, H: number) => {
-    ctx.clearRect(0, 0, W, H);
+    // Background
+    ctx.fillStyle = darkMode ? '#080c10' : '#ffffff';
+    ctx.fillRect(0, 0, W, H);
 
     // Grid lines
-    ctx.strokeStyle = '#f1f5f9';
+    ctx.strokeStyle = darkMode ? '#141c24' : '#f1f5f9';
     ctx.lineWidth   = 1;
     const gridRows = 5;
     for (let r = 0; r <= gridRows; r++) {
       const y = PAD.top + (r / gridRows) * (H - PAD.top - PAD.bottom);
       ctx.beginPath(); ctx.moveTo(PAD.left, y); ctx.lineTo(W - PAD.right, y); ctx.stroke();
     }
-    // Vertical grid lines
     const gridCols = 6;
     for (let c = 0; c <= gridCols; c++) {
       const x = PAD.left + (c / gridCols) * (W - PAD.left - PAD.right);
@@ -140,7 +143,7 @@ export default function MCPathsCanvas({
     }
 
     // Y axis labels
-    ctx.fillStyle  = '#94a3b8';
+    ctx.fillStyle  = darkMode ? '#6b7280' : '#94a3b8';
     ctx.font       = '11px system-ui, sans-serif';
     ctx.textAlign  = 'right';
     for (let r = 0; r <= gridRows; r++) {
@@ -156,6 +159,7 @@ export default function MCPathsCanvas({
 
     // X axis labels (dates)
     ctx.textAlign = 'center';
+    ctx.fillStyle = darkMode ? '#4b5563' : '#94a3b8';
     const xLabels = Math.min(6, tsIndices.length);
     for (let c = 0; c <= xLabels; c++) {
       const di   = Math.round((c / xLabels) * (nPoints - 1));
@@ -167,12 +171,21 @@ export default function MCPathsCanvas({
 
     // Capital reference line
     const capY = scaleY(capital, H);
-    ctx.strokeStyle  = '#cbd5e1';
+    ctx.strokeStyle  = darkMode ? '#1e3a5f' : '#cbd5e1';
     ctx.lineWidth    = 1;
     ctx.setLineDash([4, 4]);
     ctx.beginPath(); ctx.moveTo(PAD.left, capY); ctx.lineTo(W - PAD.right, capY); ctx.stroke();
     ctx.setLineDash([]);
-  }, [maxY, minY, currency, tsIndices, timestamps, nPoints, capital, scaleX, scaleY]);
+
+    // Loss zone tint in dark mode
+    if (darkMode) {
+      const lossGrad = ctx.createLinearGradient(0, capY, 0, H - PAD.bottom);
+      lossGrad.addColorStop(0, 'rgba(220,38,38,0.04)');
+      lossGrad.addColorStop(1, 'rgba(220,38,38,0)');
+      ctx.fillStyle = lossGrad;
+      ctx.fillRect(PAD.left, capY, W - PAD.left - PAD.right, Math.max(0, H - PAD.bottom - capY));
+    }
+  }, [darkMode, maxY, minY, currency, tsIndices, timestamps, nPoints, capital, scaleX, scaleY]);
 
   // ── Draw a single run path ──────────────────────────────────────────────────
   const drawRun = useCallback((
@@ -182,18 +195,20 @@ export default function MCPathsCanvas({
     highlight: boolean,
     dimmed: boolean,
   ) => {
-    const alpha = highlight ? 1.0 : dimmed ? 0.06 : 0.28;
+    const alpha = highlight ? 1.0
+      : dimmed   ? (darkMode ? 0.04 : 0.06)
+      : (darkMode ? 0.38 : 0.28);
     ctx.strokeStyle = highlight
       ? '#f97316'
       : returnToHSL(run.return_pct, alpha);
-    ctx.lineWidth   = highlight ? 2.5 : dimmed ? 0.6 : 0.9;
+    ctx.lineWidth   = highlight ? 2.5 : dimmed ? 0.5 : (darkMode ? 1.0 : 0.9);
     ctx.beginPath();
     run.equity.forEach((v, i) => {
       const x = scaleX(i, W), y = scaleY(v, H);
       i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
     });
     ctx.stroke();
-  }, [scaleX, scaleY]);
+  }, [darkMode, scaleX, scaleY]);
 
   // ── Draw baseline ──────────────────────────────────────────────────────────
   const drawBaseline = useCallback((ctx: CanvasRenderingContext2D, W: number, H: number) => {
@@ -379,8 +394,11 @@ export default function MCPathsCanvas({
   // ── Tooltip run (uses original runs for display metrics) ────────────────
   const tooltipRun = hovered !== null ? runs[hovered] : selected !== null ? runs[selected] : null;
 
+  const dm = darkMode;
+
   return (
-    <div ref={containerRef} className="relative w-full select-none" style={{ height }}>
+    <div ref={containerRef} className="relative w-full select-none"
+      style={{ height, borderRadius: dm ? 16 : 0, overflow: dm ? 'hidden' : undefined, background: dm ? '#080c10' : undefined }}>
       {/* Delta mode toggle */}
       {baselineEquity.length > 0 && !isLive && (
         <button
@@ -388,7 +406,9 @@ export default function MCPathsCanvas({
           className={`absolute top-1 right-1 z-10 px-2.5 py-1 rounded-lg text-[10px] font-semibold border transition-all ${
             deltaMode
               ? 'bg-indigo-600 text-white border-indigo-600'
-              : 'bg-white text-gray-500 border-gray-200 hover:border-indigo-300 hover:text-indigo-600'
+              : dm
+                ? 'bg-[#141c24] text-gray-400 border-[#1e293b] hover:border-orange-700 hover:text-orange-400'
+                : 'bg-white text-gray-500 border-gray-200 hover:border-indigo-300 hover:text-indigo-600'
           }`}
           title="Toggle: absolute equity vs % impact vs baseline"
         >
@@ -397,7 +417,7 @@ export default function MCPathsCanvas({
       )}
       <canvas
         ref={canvasRef}
-        style={{ cursor: hovered !== null ? 'pointer' : 'crosshair' }}
+        style={{ cursor: hovered !== null ? 'pointer' : 'crosshair', display: 'block' }}
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
         onClick={handleClick}
@@ -406,57 +426,63 @@ export default function MCPathsCanvas({
       {/* Tooltip */}
       {tooltipRun && mousePos && (
         <div
-          className="pointer-events-none absolute z-20 bg-white border border-gray-200 rounded-xl shadow-lg px-3 py-2 text-xs"
+          className="pointer-events-none absolute z-20 rounded-xl shadow-lg px-3 py-2 text-xs"
           style={{
-            left: mousePos.x + 14,
-            top:  Math.max(4, mousePos.y - 60),
+            left: mousePos.x + (mousePos.x > (containerRef.current?.offsetWidth ?? 400) * 0.6 ? -175 : 14),
+            top:  Math.max(4, mousePos.y - 70),
             minWidth: 160,
+            background: dm ? '#0f172a' : '#fff',
+            border: `1px solid ${dm ? '#1e293b' : '#e5e7eb'}`,
+            color: dm ? '#e2e8f0' : undefined,
+            boxShadow: dm ? '0 4px 16px rgba(0,0,0,0.6)' : undefined,
           }}
         >
           <div className="flex items-center gap-1.5 mb-1">
             <span className="w-2.5 h-2.5 rounded-full flex-shrink-0"
               style={{ background: returnToSolid(tooltipRun.return_pct) }} />
-            <span className="font-bold text-gray-700">Run #{tooltipRun.run_idx}</span>
+            <span className="font-bold" style={{ color: dm ? '#f1f5f9' : '#374151' }}>Run #{tooltipRun.run_idx}</span>
             {selected !== null && hovered === null && (
-              <span className="ml-auto text-orange-500 font-semibold">● selected</span>
+              <span className="ml-auto text-orange-500 font-semibold">● pinned</span>
             )}
           </div>
           <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-[11px]">
-            <span className="text-gray-400">Return</span>
-            <span className={`font-bold text-right ${tooltipRun.return_pct >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+            <span style={{ color: dm ? '#6b7280' : '#9ca3af' }}>Return</span>
+            <span className={`font-bold text-right ${tooltipRun.return_pct >= 0 ? 'text-green-500' : 'text-red-400'}`}>
               {tooltipRun.return_pct >= 0 ? '+' : ''}{tooltipRun.return_pct.toFixed(2)}%
             </span>
-            <span className="text-gray-400">Max DD</span>
-            <span className="font-semibold text-right text-orange-500">{tooltipRun.max_dd_pct.toFixed(2)}%</span>
-            <span className="text-gray-400">Sharpe</span>
-            <span className="font-semibold text-right text-gray-700">{tooltipRun.sharpe.toFixed(3)}</span>
-            <span className="text-gray-400">Win %</span>
-            <span className="font-semibold text-right text-gray-700">{tooltipRun.win_rate.toFixed(1)}%</span>
+            <span style={{ color: dm ? '#6b7280' : '#9ca3af' }}>Max DD</span>
+            <span className="font-semibold text-right text-orange-400">{tooltipRun.max_dd_pct.toFixed(2)}%</span>
+            <span style={{ color: dm ? '#6b7280' : '#9ca3af' }}>Sharpe</span>
+            <span className="font-semibold text-right" style={{ color: dm ? '#d1d5db' : '#374151' }}>{tooltipRun.sharpe.toFixed(3)}</span>
+            <span style={{ color: dm ? '#6b7280' : '#9ca3af' }}>Win %</span>
+            <span className="font-semibold text-right" style={{ color: dm ? '#d1d5db' : '#374151' }}>{tooltipRun.win_rate.toFixed(1)}%</span>
           </div>
           {selected === null && (
-            <p className="mt-1.5 text-[10px] text-gray-400 italic">Click to pin</p>
+            <p className="mt-1.5 text-[10px] italic" style={{ color: dm ? '#374151' : '#9ca3af' }}>Click to pin</p>
           )}
         </div>
       )}
 
       {/* Selected run detail chip */}
       {selected !== null && !mousePos && runs[selected] && (
-        <div className="absolute top-2 right-2 z-10 bg-orange-50 border border-orange-200 rounded-xl px-2.5 py-1.5 text-xs shadow">
-          <span className="font-bold text-orange-600">Run #{runs[selected].run_idx} selected</span>
-          <span className="text-gray-400 ml-2 cursor-pointer hover:text-red-500"
+        <div className={`absolute top-2 right-2 z-10 rounded-xl px-2.5 py-1.5 text-xs shadow ${
+          dm ? 'bg-orange-900/40 border border-orange-700' : 'bg-orange-50 border border-orange-200'
+        }`}>
+          <span className="font-bold text-orange-400">Run #{runs[selected].run_idx} pinned</span>
+          <span className={`ml-2 cursor-pointer ${dm ? 'text-gray-500 hover:text-red-400' : 'text-gray-400 hover:text-red-500'}`}
             onClick={() => setSelected(null)}>✕</span>
         </div>
       )}
 
       {/* Live progress badge */}
       {isLive && totalExpected != null && (
-        <div className="absolute bottom-10 left-[76px] text-[11px] text-gray-400">
+        <div className={`absolute bottom-10 left-[76px] text-[11px] ${dm ? 'text-gray-600' : 'text-gray-400'}`}>
           {runs.length} / {totalExpected} paths
         </div>
       )}
 
       {/* Legend */}
-      <div className="absolute top-2 left-[76px] flex items-center gap-3 text-[10px] text-gray-400">
+      <div className={`absolute top-2 left-[76px] flex items-center gap-3 text-[10px] ${dm ? 'text-gray-600' : 'text-gray-400'}`}>
         <span className="flex items-center gap-1">
           <span className="w-6 border-t-2 border-blue-400 border-dashed inline-block" /> Baseline
         </span>

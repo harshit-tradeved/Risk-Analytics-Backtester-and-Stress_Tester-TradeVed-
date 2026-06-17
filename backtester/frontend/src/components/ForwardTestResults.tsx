@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ForecastResponse, ForecastCompareResult, RegimeDistribution } from '../types';
 import MCPathsCanvas, { MCRun } from './MCPathsCanvas';
-import CrisisFanChart from './CrisisFanChart';
+import CrisisFanChart, { CrisisFanRun } from './CrisisFanChart';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -613,32 +613,23 @@ export default function ForwardTestResults({
       {mcRuns.length > 0 && !noTrades && (
         <div>
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
-            {isCrisis ? 'Stressed Equity Fan Chart — percentile bands across paths' : 'Strategy Equity Paths across Synthetic Futures'}
+            {isCrisis ? 'Stressed Equity Paths — hover to inspect, click to pin' : 'Strategy Equity Paths across Synthetic Futures'}
           </p>
-          {isCrisis ? (
-            <CrisisFanChart
-              runs={mcRuns}
-              baselineEquity={series.baseline_equity ?? []}
-              capital={baseline?.initial_capital ?? 10_000}
-              currency={currency}
-              height={320}
-            />
-          ) : (
-            <>
-              <MCPathsCanvas
-                runs={mcRuns}
-                baselineEquity={series.baseline_equity ?? []}
-                timestamps={series.timestamps ?? []}
-                tsIndices={tsIndices}
-                capital={baseline?.initial_capital ?? 10_000}
-                currency={currency}
-                locale={locale}
-                height={340}
-              />
-              <p className="text-[10px] text-gray-300 mt-2 text-center">
-                Colour: red = loss path · teal = gain path · click to pin · delta toggle for relative impact
-              </p>
-            </>
+          <MCPathsCanvas
+            runs={mcRuns}
+            baselineEquity={series.baseline_equity ?? []}
+            timestamps={series.timestamps ?? []}
+            tsIndices={tsIndices}
+            capital={baseline?.initial_capital ?? 10_000}
+            currency={currency}
+            locale={locale}
+            height={isCrisis ? 320 : 340}
+            darkMode={isCrisis}
+          />
+          {!isCrisis && (
+            <p className="text-[10px] text-gray-300 mt-2 text-center">
+              Colour: red = loss path · teal = gain path · click to pin · delta toggle for relative impact
+            </p>
           )}
         </div>
       )}

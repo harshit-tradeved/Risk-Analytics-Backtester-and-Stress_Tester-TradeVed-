@@ -3,6 +3,7 @@ import { ForecastFormState, ForecastResponse, ForecastCompareResult, RegimeDistr
 import ForwardTestSidebar, { DEFAULT_FORECAST_FORM } from './ForwardTestSidebar';
 import ForwardTestResults from './ForwardTestResults';
 import MCPathsCanvas, { MCRun } from './MCPathsCanvas';
+import CrisisFanChart from './CrisisFanChart';
 import PaperTradeView from './PaperTradeView';
 import { streamForwardTest, streamCrisisTest, compareForecastMethods, isIndianSource, StreamRun } from '../api';
 
@@ -133,12 +134,14 @@ function LiveLoadingView({
       )}
 
       {/* Live canvas */}
-      <div className="px-4 pt-4 pb-2">
+      <div className={crisis ? 'pt-2 pb-1' : 'px-4 pt-4 pb-2'}>
         {hasRuns ? (
           <>
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
-              {crisis ? 'Stressed Equity Paths — building live' : 'Synthetic Equity Paths — building live'}
-            </p>
+            {!crisis && (
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                Synthetic Equity Paths — building live
+              </p>
+            )}
             <MCPathsCanvas
               runs={liveRuns}
               baselineEquity={[]}
@@ -147,9 +150,10 @@ function LiveLoadingView({
               capital={form.capital}
               currency={currency}
               locale={locale}
-              height={320}
+              height={crisis ? 300 : 320}
               isLive
               totalExpected={total}
+              darkMode={crisis}
             />
           </>
         ) : (
@@ -165,10 +169,11 @@ function LiveLoadingView({
         )}
       </div>
 
-      <p className="text-center text-xs text-gray-300 pb-4">
-        Colour: red = projected loss · teal = projected gain
-        {crisis && ' · Crisis scaffold applied to each generated path'}
-      </p>
+      {!crisis && (
+        <p className="text-center text-xs text-gray-300 pb-4">
+          Colour: red = projected loss · teal = projected gain
+        </p>
+      )}
     </div>
   );
 }
