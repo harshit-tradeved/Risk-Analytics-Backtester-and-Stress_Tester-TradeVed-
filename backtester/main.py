@@ -1847,12 +1847,30 @@ async def stream_forecast_sse(req: ForecastRequest):
         regime_counter: Counter           = Counter()
         profitable_count: int             = 0
 
-        # Batch-generate all paths in one Kronos call (1 HTTP round-trip instead of N)
+        # Concurrent Kronos batches: fire N/10 requests in parallel via asyncio.gather
+        # so Modal auto-scales containers → ~2s instead of ~100s sequential
         yield _ev({"type": "fetching_paths", "total": n_paths_})
         try:
-            all_paths = await asyncio.to_thread(
-                _gen_paths, df_snap, n_paths_, horizon_, 20, req_snap.seed,
-            )
+            _kurl = os.getenv("KRONOS_URL")
+            if _kurl:
+                from engine.forecast import KronosClient as _KC
+                _client = _KC(_kurl)
+                _BATCH  = 10
+                _specs  = [
+                    (min(_BATCH, n_paths_ - s),
+                     (req_snap.seed + s) if req_snap.seed is not None else None)
+                    for s in range(0, n_paths_, _BATCH)
+                ]
+                _batches = await asyncio.gather(*[
+                    asyncio.to_thread(_client.generate_paths, df_snap, bn, horizon_, bs)
+                    for bn, bs in _specs
+                ])
+                all_paths: list = [p for batch in _batches for p in batch]
+            else:
+                from engine.forecast import _block_bootstrap_paths as _bbp
+                all_paths = await asyncio.to_thread(
+                    _bbp, df_snap, n_paths_, horizon_, 20, req_snap.seed,
+                )
         except Exception as exc:
             yield _ev({"type": "error", "message": f"Path generation failed: {exc}"})
             return
@@ -2035,12 +2053,29 @@ async def stream_crisis_sse(req: CrisisRequest):
         regime_counter: Counter          = Counter()
         profitable_count = 0
 
-        # Batch-generate all raw paths in one Kronos call, then apply stress per-path
+        # Concurrent Kronos batches: fire N/10 requests in parallel via asyncio.gather
         yield _ev({"type": "fetching_paths", "total": n_paths_})
         try:
-            all_raw_paths = await asyncio.to_thread(
-                _gen_paths, df_snap, n_paths_, horizon_, 20, req_snap.seed,
-            )
+            _kurl = os.getenv("KRONOS_URL")
+            if _kurl:
+                from engine.forecast import KronosClient as _KC
+                _client = _KC(_kurl)
+                _BATCH  = 10
+                _specs  = [
+                    (min(_BATCH, n_paths_ - s),
+                     (req_snap.seed + s) if req_snap.seed is not None else None)
+                    for s in range(0, n_paths_, _BATCH)
+                ]
+                _batches = await asyncio.gather(*[
+                    asyncio.to_thread(_client.generate_paths, df_snap, bn, horizon_, bs)
+                    for bn, bs in _specs
+                ])
+                all_raw_paths: list = [p for batch in _batches for p in batch]
+            else:
+                from engine.forecast import _block_bootstrap_paths as _bbp
+                all_raw_paths = await asyncio.to_thread(
+                    _bbp, df_snap, n_paths_, horizon_, 20, req_snap.seed,
+                )
         except Exception as exc:
             yield _ev({"type": "error", "message": f"Path generation failed: {exc}"})
             return
