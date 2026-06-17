@@ -53,33 +53,30 @@ function RegimeBar({ dist }: { dist: RegimeDistribution }) {
   const dominant = dist.bull >= dist.bear && dist.bull >= dist.sideways ? 'bull'
     : dist.bear >= dist.sideways ? 'bear' : 'sideways';
   const label = dominant === 'bull' ? 'Mostly Bullish' : dominant === 'bear' ? 'Mostly Bearish' : 'Mostly Sideways';
+  const domPct = dominant === 'bull' ? dist.bull : dominant === 'bear' ? dist.bear : dist.sideways;
+
+  const COLORS = {
+    bull:     { bar: 'bg-teal-500',   track: 'bg-teal-100',   badge: 'bg-teal-50 text-teal-700',     dot: 'text-teal-600'   },
+    bear:     { bar: 'bg-red-500',    track: 'bg-red-100',    badge: 'bg-red-50 text-red-600',        dot: 'text-red-500'    },
+    sideways: { bar: 'bg-yellow-500', track: 'bg-yellow-100', badge: 'bg-yellow-50 text-yellow-700',  dot: 'text-yellow-600' },
+  };
+  const c = COLORS[dominant];
+  const max3 = Math.max(dist.bull, dist.bear, dist.sideways);
 
   return (
     <div className="bg-gray-50 rounded-2xl p-4">
       <div className="flex items-center justify-between mb-3">
         <p className="text-xs font-semibold text-gray-500">Regime Forecast across Paths</p>
-        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
-          dominant === 'bull' ? 'bg-teal-50 text-teal-700' :
-          dominant === 'bear' ? 'bg-red-50 text-red-600' :
-          'bg-yellow-50 text-yellow-700'
-        }`}>{label}</span>
+        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${c.badge}`}>{label}</span>
       </div>
-      {/* Stacked bar */}
-      <div className="flex rounded-full overflow-hidden h-3 mb-2">
-        {dist.bull > 0 && (
-          <div className="bg-teal-400 transition-all" style={{ width: `${dist.bull}%` }} title={`Bull ${dist.bull}%`} />
-        )}
-        {dist.sideways > 0 && (
-          <div className="bg-yellow-400 transition-all" style={{ width: `${dist.sideways}%` }} title={`Sideways ${dist.sideways}%`} />
-        )}
-        {dist.bear > 0 && (
-          <div className="bg-red-400 transition-all" style={{ width: `${dist.bear}%` }} title={`Bear ${dist.bear}%`} />
-        )}
+      {/* Single dominant-color bar */}
+      <div className={`w-full rounded-full h-3 mb-3 ${c.track}`}>
+        <div className={`h-full rounded-full transition-all duration-500 ${c.bar}`} style={{ width: `${domPct}%` }} />
       </div>
       <div className="flex gap-4 text-[10px] font-semibold">
-        <span className="text-teal-600">● Bull {dist.bull}%</span>
-        <span className="text-yellow-600">● Sideways {dist.sideways}%</span>
-        <span className="text-red-500">● Bear {dist.bear}%</span>
+        <span className={dist.bull === max3 ? COLORS.bull.dot     : 'text-gray-400'}>● Bull {dist.bull}%</span>
+        <span className={dist.sideways === max3 ? COLORS.sideways.dot : 'text-gray-400'}>● Sideways {dist.sideways}%</span>
+        <span className={dist.bear === max3 ? COLORS.bear.dot     : 'text-gray-400'}>● Bear {dist.bear}%</span>
       </div>
     </div>
   );
@@ -162,6 +159,58 @@ function PriceSpaghetti({ runs, horizon }: {
           {sign(hovered.ret)}%
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Crisis return histogram ────────────────────────────────────────────────────
+
+function CrisisHistogram({ runs }: { runs: { return_pct: number }[] }) {
+  if (runs.length === 0) return null;
+  const BUCKETS = [
+    { lo: -Infinity, hi: -30, label: '<-30%',     color: '#dc2626' },
+    { lo: -30,       hi: -20, label: '-30% to -20%', color: '#ef4444' },
+    { lo: -20,       hi: -10, label: '-20% to -10%', color: '#f97316' },
+    { lo: -10,       hi: 0,   label: '-10% to 0%',   color: '#fbbf24' },
+    { lo: 0,         hi: 10,  label: '0% to +10%',   color: '#4ade80' },
+    { lo: 10,        hi: 20,  label: '+10% to +20%', color: '#2dd4bf' },
+    { lo: 20,        hi: Infinity, label: '>+20%',   color: '#14b8a6' },
+  ];
+  const counts = BUCKETS.map(b => ({
+    ...b,
+    count: runs.filter(r => r.return_pct >= b.lo && r.return_pct < b.hi).length,
+    pct:   0,
+  }));
+  const maxCount = Math.max(...counts.map(c => c.count), 1);
+  counts.forEach(c => { c.pct = Math.round(c.count / runs.length * 100); });
+
+  return (
+    <div className="bg-gray-950 rounded-2xl p-5">
+      <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">
+        Crisis Return Distribution — {runs.length} paths
+      </p>
+      <div className="space-y-2">
+        {counts.map(b => (
+          <div key={b.label} className="flex items-center gap-3">
+            <span className="text-[10px] text-gray-500 w-24 text-right flex-shrink-0">{b.label}</span>
+            <div className="flex-1 bg-gray-800 rounded h-5 overflow-hidden relative">
+              <div
+                className="h-full rounded transition-all duration-700"
+                style={{ width: `${(b.count / maxCount) * 100}%`, background: b.color, opacity: 0.85 }}
+              />
+              {b.count > 0 && (
+                <span className="absolute inset-0 flex items-center pl-2 text-[10px] font-bold"
+                  style={{ color: b.color }}>
+                  {b.count} ({b.pct}%)
+                </span>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="text-[10px] text-gray-600 mt-3 text-center">
+        Each bar = number of paths landing in that return bucket
+      </p>
     </div>
   );
 }
@@ -366,43 +415,51 @@ export default function ForwardTestResults({
     <div className="space-y-6">
 
       {/* ── Header ───────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h2 className="text-xl font-bold text-[var(--tv-text)]">
-            {isCrisis ? 'Crisis Simulation Results' : 'Forward Test Results'}
-          </h2>
-          <p className="text-sm text-[var(--tv-muted)] flex items-center gap-2 flex-wrap">
-            <span>{result.symbol} · {result.strategy}</span>
-            {forecast && (
-              <>
-                <span>·</span>
-                <span className="font-semibold">{forecast.horizon_days}d horizon</span>
-                <span>·</span>
-                <span className="font-semibold">{forecast.n_paths} paths</span>
-                <span>·</span>
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                  method === 'kronos'
-                    ? 'bg-teal-50 text-teal-700 border border-teal-200'
-                    : 'bg-indigo-50 text-indigo-600 border border-indigo-200'
-                }`}>{methodLabel}</span>
-                {isCrisis && forecast.scenario_display && (
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-50 text-orange-600 border border-orange-200">
-                    {forecast.scenario_display}
-                  </span>
-                )}
-              </>
-            )}
-          </p>
-        </div>
-        {survivalPct != null && (
-          <div className={`px-4 py-2 rounded-full text-sm font-bold border ${
-            survivalPct >= 60 ? 'bg-teal-50 text-teal-700 border-teal-200'
-            : survivalPct >= 40 ? 'bg-yellow-50 text-yellow-700 border-yellow-200'
-            : 'bg-red-50 text-red-600 border-red-200'
-          }`}>
-            {survivalPct.toFixed(0)}% forward survival
+      <div className={`rounded-2xl p-5 ${isCrisis ? 'bg-gradient-to-r from-gray-950 to-orange-950 border border-orange-900/40' : 'bg-white'}`}>
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <h2 className={`text-xl font-bold ${isCrisis ? 'text-orange-100' : 'text-[var(--tv-text)]'}`}>
+              {isCrisis ? '🔥 Crisis Simulation Results' : '🔭 Forward Test Results'}
+            </h2>
+            <p className={`text-sm flex items-center gap-2 flex-wrap mt-1 ${isCrisis ? 'text-orange-300/70' : 'text-[var(--tv-muted)]'}`}>
+              <span>{result.symbol} · {result.strategy}</span>
+              {forecast && (
+                <>
+                  <span>·</span>
+                  <span className="font-semibold">{forecast.horizon_days}d horizon</span>
+                  <span>·</span>
+                  <span className="font-semibold">{forecast.n_paths} paths</span>
+                  <span>·</span>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                    method === 'kronos'
+                      ? 'bg-teal-900/60 text-teal-300 border border-teal-700'
+                      : isCrisis
+                        ? 'bg-orange-900/60 text-orange-300 border border-orange-700'
+                        : 'bg-indigo-50 text-indigo-600 border border-indigo-200'
+                  }`}>{methodLabel}</span>
+                  {isCrisis && forecast.scenario_display && (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-900/60 text-red-300 border border-red-700">
+                      ⚠ {forecast.scenario_display}
+                    </span>
+                  )}
+                </>
+              )}
+            </p>
           </div>
-        )}
+          {survivalPct != null && (
+            <div className={`px-4 py-2 rounded-full text-sm font-bold border ${
+              isCrisis
+                ? survivalPct >= 60 ? 'bg-teal-900/50 text-teal-300 border-teal-700'
+                  : survivalPct >= 40 ? 'bg-yellow-900/50 text-yellow-300 border-yellow-700'
+                  : 'bg-red-900/50 text-red-300 border-red-700'
+                : survivalPct >= 60 ? 'bg-teal-50 text-teal-700 border-teal-200'
+                  : survivalPct >= 40 ? 'bg-yellow-50 text-yellow-700 border-yellow-200'
+                  : 'bg-red-50 text-red-600 border-red-200'
+            }`}>
+              {survivalPct.toFixed(0)}% {isCrisis ? 'crisis survival' : 'forward survival'}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ── No-trades warning ────────────────────────────────────────── */}
@@ -517,11 +574,16 @@ export default function ForwardTestResults({
         </div>
       )}
 
+      {/* ── Crisis histogram (crisis mode only) ──────────────────────── */}
+      {isCrisis && mc && mc.per_run.length > 0 && !noTrades && (
+        <CrisisHistogram runs={mc.per_run} />
+      )}
+
       {/* ── Equity spaghetti canvas ───────────────────────────────────── */}
       {mcRuns.length > 0 && !noTrades && (
         <div>
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
-            Strategy Equity Paths across Synthetic Futures
+            {isCrisis ? 'Stressed Equity Paths — per scenario path' : 'Strategy Equity Paths across Synthetic Futures'}
           </p>
           <MCPathsCanvas
             runs={mcRuns}
@@ -531,10 +593,12 @@ export default function ForwardTestResults({
             capital={baseline?.initial_capital ?? 10_000}
             currency={currency}
             locale={locale}
-            height={340}
+            height={isCrisis ? 260 : 340}
           />
           <p className="text-[10px] text-gray-300 mt-2 text-center">
-            Colour: red = loss path · teal = gain path · click to pin · delta toggle for relative impact
+            {isCrisis
+              ? 'Each path has Kronos micro-structure + crisis scaffold applied · click to pin a path'
+              : 'Colour: red = loss path · teal = gain path · click to pin · delta toggle for relative impact'}
           </p>
         </div>
       )}
