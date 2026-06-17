@@ -83,6 +83,9 @@ class PLAStrategy(BaseStrategy):
     def _qty(self, price: float, level_idx: int) -> float:
         """Return quantity for the given level, preferring dollar-based sizing."""
         invest_list = getattr(self, "invest_per_level_usd", [])
+        # Scalar invest_per_level_usd (user passed a single number) → treat as uniform per level
+        if isinstance(invest_list, (int, float)):
+            invest_list = [float(invest_list)] * max(len(getattr(self, "entry_levels", [0])), 1)
         if invest_list and level_idx < len(invest_list) and invest_list[level_idx] > 0 and price > 0:
             return invest_list[level_idx] / price
         qty_list = getattr(self, "entry_quantities", [0.001])
