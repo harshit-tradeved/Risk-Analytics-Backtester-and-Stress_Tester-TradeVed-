@@ -2166,6 +2166,7 @@ async def compare_forecast_methods(req: ForecastRequest):
 
     def _run_method(paths: list) -> dict:
         """Run strategy on a list of paths and return aggregate summary."""
+        import numpy as _np
         per_run, equity_curves, price_curves = [], [], []
         rc: Counter = Counter()
         for i, path_df in enumerate(paths):
@@ -2201,11 +2202,11 @@ async def compare_forecast_methods(req: ForecastRequest):
         n = len(per_run)
         return {
             "n_paths":            n,
-            "return_pct":         {"p5": round(float(np.percentile(returns,  5)), 3),
-                                   "p50": round(float(np.percentile(returns, 50)), 3),
-                                   "p95": round(float(np.percentile(returns, 95)), 3)},
-            "sharpe":             {"p50": round(float(np.percentile(sharpes, 50)), 3)},
-            "max_dd_pct":         {"p50": round(float(np.percentile(dds,     50)), 3)},
+            "return_pct":         {"p5": round(float(_np.percentile(returns,  5)), 3),
+                                   "p50": round(float(_np.percentile(returns, 50)), 3),
+                                   "p95": round(float(_np.percentile(returns, 95)), 3)},
+            "sharpe":             {"p50": round(float(_np.percentile(sharpes, 50)), 3)},
+            "max_dd_pct":         {"p50": round(float(_np.percentile(dds,     50)), 3)},
             "forward_survival_pct": round(sum(1 for r in returns if r > 0) / n * 100, 1),
             "regime_distribution":  {
                 "bull":     round(rc.get("bull",     0) / n * 100, 1),

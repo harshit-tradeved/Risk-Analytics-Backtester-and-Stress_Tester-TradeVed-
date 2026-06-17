@@ -34,7 +34,7 @@ image = (
         "pydantic>=2.0.0",
     )
     # Copy our service code into the image
-    .copy_local_file("main.py", "/app/main.py")
+    .add_local_file("main.py", "/app/main.py")
 )
 
 app = modal.App("kronos-service", image=image)
