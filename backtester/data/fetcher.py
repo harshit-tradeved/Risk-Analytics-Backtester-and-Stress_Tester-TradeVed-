@@ -345,21 +345,47 @@ class YFinanceFetcher:
 
     @classmethod
     def _clamp_interval(cls, yf_interval: str, days: int) -> str:
-        """Downgrade yf interval when date range exceeds what yfinance supports."""
+        """
+        Downgrade yf interval when date range exceeds what yfinance supports.
+        Recurses through the fallback chain (e.g. 15m -> 1h -> 1d) so each
+        intermediate interval's OWN day-limit is re-checked rather than assumed
+        to fit — a single-step downgrade previously skipped re-validating 1h's
+        own 730-day cap. Uses a 1-day safety margin since Yahoo sometimes
+        rejects requests sitting exactly on the boundary.
+        """
         max_days = cls._MAX_DAYS.get(yf_interval)
-        if max_days is None or days <= max_days:
+        if max_days is None:
+            return yf_interval  # "1d" / "1wk" — no intraday cap
+        if days <= max_days - 1:
             return yf_interval
-        if days <= 730:
+        if yf_interval == "1h":
             logger.warning(
-                "yfinance: interval %s supports only %d days; date range=%d days — falling back to 1h",
-                yf_interval, max_days, days,
+                "yfinance: interval 1h supports only %d days; date range=%d days — falling back to 1d",
+                max_days, days,
             )
-            return "1h"
+            return "1d"
         logger.warning(
-            "yfinance: interval %s supports only %d days; date range=%d days — falling back to 1d",
+            "yfinance: interval %s supports only %d days; date range=%d days — falling back to 1h",
             yf_interval, max_days, days,
         )
-        return "1d"
+        return cls._clamp_interval("1h", days)
+
+    # Commodity/forex tickers commonly emitted by the reel-extraction LLM (raw
+    # trading-jargon symbols like "XAUUSD") that are NOT valid Yahoo Finance
+    # tickers as-is. Found via reel_pipeline_test_results.xlsx Test 10: LLM
+    # suggested symbol="XAUUSD" source="yfinance" → yfinance raised "no data".
+    _FOREX_COMMODITY_MAP: dict[str, str] = {
+        "XAUUSD": "GC=F",   "XAU/USD": "GC=F",   "GOLD": "GC=F",
+        "XAGUSD": "SI=F",   "XAG/USD": "SI=F",   "SILVER": "SI=F",
+        "WTI": "CL=F",      "USOIL": "CL=F",     "CRUDEOIL": "CL=F",
+        "NATGAS": "NG=F",   "NATURALGAS": "NG=F",
+        "EURUSD": "EURUSD=X", "EUR/USD": "EURUSD=X",
+        "GBPUSD": "GBPUSD=X", "GBP/USD": "GBPUSD=X",
+        "USDJPY": "USDJPY=X", "USD/JPY": "USDJPY=X",
+        "USDINR": "USDINR=X", "USD/INR": "USDINR=X",
+        "AUDUSD": "AUDUSD=X", "AUD/USD": "AUDUSD=X",
+        "USDCAD": "USDCAD=X", "USD/CAD": "USDCAD=X",
+    }
 
     def _to_yf_symbol(self, symbol: str, exchange: str = "") -> str:
         """
@@ -370,11 +396,16 @@ class YFinanceFetcher:
           'AAPL'             → 'AAPL'        (US stocks — pass-through)
           'RELIANCE.NS'      → 'RELIANCE.NS' (already yfinance format)
           '^NSEI'            → '^NSEI'       (indices — pass-through)
+          'XAUUSD'           → 'GC=F'        (forex/commodity jargon ticker)
         """
         s = symbol.strip()
         # Already in yfinance format
-        if s.endswith(".NS") or s.endswith(".BO") or s.startswith("^"):
+        if s.endswith(".NS") or s.endswith(".BO") or s.startswith("^") or s.endswith("=X") or s.endswith("=F"):
             return s
+        # Forex/commodity trading-jargon tickers (e.g. reel-extraction LLM output)
+        mapped = self._FOREX_COMMODITY_MAP.get(s.upper())
+        if mapped:
+            return mapped
         # Crypto pairs: 'BTC/USDT' → 'BTC-USD'
         if "/" in s:
             base, quote = s.split("/")
@@ -408,7 +439,10 @@ class YFinanceFetcher:
         )
 
         if raw.empty:
-            raise ValueError(f"yfinance returned no data for {symbol}")
+            raise ValueError(
+                f"yfinance returned no data for {symbol}"
+                + (f" (resolved to ticker '{yf_sym}')" if yf_sym != symbol else "")
+            )
 
         df = raw.reset_index()
         ts_col = "Datetime" if "Datetime" in df.columns else "Date"

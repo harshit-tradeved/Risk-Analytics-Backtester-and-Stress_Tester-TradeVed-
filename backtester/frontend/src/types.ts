@@ -431,6 +431,84 @@ export interface FormState {
   wfStep:         number;   // walk-forward step/test size in candles (default 63)
 }
 
+// ── Reel → Backtest types ─────────────────────────────────────────────────────
+
+export interface TriageResult {
+  is_strategy:  boolean;
+  is_complete:  boolean;
+  type:         'testable_strategy' | 'partial_strategy' | 'market_commentary' | 'motivational' | 'advertisement' | 'unknown';
+  confidence:   number;
+  reason:       string;
+}
+
+export interface IROperand {
+  indicator?: string;
+  params?:    Record<string, number>;
+  output?:    string;
+  price?:     string;
+  value?:     number;
+}
+
+export interface IRRule {
+  left:     IROperand;
+  operator: '>' | '>=' | '<' | '<=' | 'cross_above' | 'cross_below';
+  right:    IROperand;
+}
+
+export interface StrategyIR {
+  strategy: string;
+  params:   Record<string, unknown>;
+}
+
+export interface ReelAnalysisResponse {
+  triage:              TriageResult;
+  transcript:          string;
+  strategy_ir:         StrategyIR | null;
+  gaps:                string[];
+  confidence:          number;
+  ir_errors?:          string[];
+  cleaned?:            Record<string, unknown>;
+  error?:              string;
+  suggested_symbol?:   string | null;
+  suggested_source?:   string | null;
+  suggested_interval?: string | null;
+}
+
+export interface IRChange {
+  field:  string;
+  before: unknown;
+  after:  unknown;
+  reason: string;
+}
+
+export interface DiffRow {
+  key:         string;
+  label:       string;
+  original:    number;
+  improved:    number;
+  delta:       number;
+  pct_change:  number | null;
+  better:      boolean | null;
+}
+
+export interface JudgeVerdict {
+  approved:     boolean;
+  issues:       string[];
+  overfit_risk: 'low' | 'medium' | 'high' | 'unknown';
+  notes:        string;
+}
+
+export interface ImproveResponse {
+  problems:        string[];
+  changes:         IRChange[];
+  confidence:      number;
+  original_ir:     StrategyIR;
+  improved_ir:     StrategyIR;
+  improved_result: BacktestResponse;
+  diff:            DiffRow[];
+  judge:           JudgeVerdict;
+}
+
 // ── Forward Test types ────────────────────────────────────────────────────────
 
 export interface ForecastFormState {

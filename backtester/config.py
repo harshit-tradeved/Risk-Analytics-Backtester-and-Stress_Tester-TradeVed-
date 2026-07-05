@@ -69,6 +69,40 @@ DEFAULT_FEE_PERCENT      = 0.001   # 0.1 % Binance taker fee
 DEFAULT_SLIPPAGE_PERCENT = 0.001   # 0.1 % market-impact slippage
 DEFAULT_CAPITAL          = 10_000.0
 
+# ── Reel → Backtest pipeline ─────────────────────────────────────────────────
+# LLM provider: "azure" (default — GPT-5.3-Codex) | "openai" | "anthropic"
+LLM_PROVIDER      = os.getenv("LLM_PROVIDER", "azure")
+
+# Azure OpenAI Responses API (GPT-5.3-Codex)
+AZURE_API_KEY  = os.getenv("AZURE_API_KEY", "")
+AZURE_ENDPOINT = os.getenv(
+    "AZURE_ENDPOINT",
+    "https://tradeved-ai-agents.openai.azure.com/openai/responses?api-version=2025-04-01-preview",
+)
+AZURE_MODEL    = os.getenv("AZURE_MODEL", "gpt-5.3-codex")
+
+# Standard OpenAI (fallback)
+OPENAI_API_KEY    = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL      = os.getenv("OPENAI_MODEL", "gpt-4o")
+
+# Anthropic (fallback)
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL   = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+
+# Ingestion pipeline
+INGESTION_API_URL          = os.getenv("INGESTION_API_URL", "")           # friend's deployed service (optional)
+GROQ_API_KEY               = os.getenv("GROQ_API_KEY", "")                # Whisper transcription via Groq
+APIFY_TOKEN                = os.getenv("APIFY_TOKEN", "")                  # fallback when yt-dlp is blocked
+_ig_cookies_raw = os.getenv("INSTAGRAM_COOKIES_FILE", "")
+# Resolve relative to BASE_DIR (backtester/) so it works regardless of the
+# process's cwd — a bare filename in .env would otherwise only resolve if
+# main.py happened to be launched from exactly this directory.
+INSTAGRAM_COOKIES_FILE = (
+    str(BASE_DIR / _ig_cookies_raw) if _ig_cookies_raw and not os.path.isabs(_ig_cookies_raw)
+    else _ig_cookies_raw
+)  # path to cookies.txt for yt-dlp
+INSTAGRAM_COOKIES_BROWSER = os.getenv("INSTAGRAM_COOKIES_BROWSER", "")   # browser to pull cookies from (e.g. "chrome")
+
 # ── Rate Limiting ─────────────────────────────────────────────────────────────
 RATE_LIMIT_PER_MINUTE = 100
 

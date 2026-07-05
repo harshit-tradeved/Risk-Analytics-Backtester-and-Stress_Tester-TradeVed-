@@ -1,322 +1,165 @@
-# TradeVed Backtester
+<div align="center">
 
-Full-stack quantitative backtesting and stress-testing platform for **crypto**, **US stocks**, and **Indian markets (NSE/BSE)**.
+# 📈 TradeVed — Backtester & Risk Analytics
 
-- **Backend:** FastAPI + SQLite + Python 3.11+
-- **Frontend:** React 18 + Vite + TypeScript + Tailwind CSS
-- **Strategies:** Grid, DCA, PLA (EMA crossover + cascading entries)
-- **Markets:** Binance (crypto), yfinance (US stocks / NSE / BSE), CoinGecko
+### A full-stack quantitative backtesting, stress-testing & AI-forecasting platform for Crypto, US Stocks and Indian Markets (NSE/BSE)
 
----
+[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-async-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)](https://react.dev)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://typescriptlang.org)
+[![Tailwind](https://img.shields.io/badge/Tailwind_CSS-3-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
+[![Tests](https://img.shields.io/badge/tests-37_unit_%2B_207_stress-brightgreen)](backtester/test_all.py)
 
-## Features
+*Backtest any strategy. Stress it through 17 historical crises. Forecast it with AI. Even turn an Instagram trading reel into a verified backtest.*
 
-### Backtester
-- **3 strategies** — Grid (price-level crossing), DCA (interval buys), PLA (EMA crossover + cascading)
-- **3 markets** — Crypto (Binance / CoinGecko), US stocks (yfinance), Indian NSE/BSE
-- **Indian cost model** — STT + NSE exchange charges + SEBI + GST at Budget 2024 rates
-- **Indian F&O** — Lot-size enforcement for futures/options (NIFTY50, BANKNIFTY, FINNIFTY, etc.)
-- **Walk-forward validation** — Out-of-sample testing with configurable windows
-- **Regime detection** — Timeframe-aware bull / bear / sideways labelling
-- **Smart Fill** — Auto-fills capital and strategy params from the current symbol
-- **GRID auto-bounds** — Detects price range automatically when bounds are left at 0
-
-### Stress Tester
-- **17 scenario presets** — 13 global (GFC 2008, COVID crash, LUNA collapse, slow bleed, pump & dump…) + 4 Indian-specific (Demonetization 2016, COVID NIFTY, Yes Bank Collapse, F&O Expiry Gamma Squeeze)
-- **SSE streaming** — Live Monte Carlo paths building up in real time on a canvas chart
-- **Monte Carlo** — 100+ runs with per-run magnitude jitter (`severity × uniform(0.75, 1.25)`)
-- **Delta mode** — Toggle between absolute equity and % impact vs baseline
-- **All markets supported** — works with all 3 strategies across every data source
+</div>
 
 ---
 
-## Quick Start
+## 🏆 Why This Project Stands Out
 
-### 1. Prerequisites
+| | |
+|---|---|
+| 🇮🇳 **Real Indian market economics** | Itemised STT, exchange charges, SEBI fees, GST, stamp duty at **Budget 2024 rates** — plus F&O **lot-size enforcement** (NIFTY50 = 50, BANKNIFTY = 15…). Most backtesters fake this with a flat fee. |
+| 💥 **Crisis-grade stress testing** | **17 scenario presets** — GFC 2008, COVID crash, LUNA collapse, pump & dump… plus 4 India-specific ones (Demonetization 2016, Yes Bank collapse, F&O expiry gamma squeeze) — replayed as Monte Carlo simulations **streamed live over SSE** onto a canvas "spaghetti" chart that handles 1000+ paths. |
+| 🤖 **AI strategy extraction from social media** | Paste an Instagram reel / YouTube transcript → an LLM extracts the strategy into a validated intermediate representation (IR) → it runs on the real engine → a **plain-language verdict** tells a novice whether the influencer's strategy actually works. |
+| 🔮 **Kronos AI price forecasting** | Foundation-model time-series forecasting (Kronos) deployed on Modal, with concurrent batched path generation (100 paths ≈ 2 s) compared against classical bootstrap. |
+| 🧱 **No-code strategy builder** | 25 indicators (40 output series) in a pure pandas/numpy engine + a visual rule builder (`cross_above`, `cross_below`, AND/OR logic) — new strategies need **zero frontend changes** thanks to schema-driven forms. |
 
-- Python 3.11+
-- Node.js 18+
-- Git
+---
 
-### 2. Clone & set up Python environment
+## 🖼️ Architecture
+
+![Architecture](architecture.svg)
+
+```
+React 18 + Vite + TS ──► FastAPI (async, SSE) ──► Strategy Engine ──► Trade Simulator (WACB, partial fills, lot sizes)
+        │                       │                      │                     │
+   Canvas MC charts        SQLite (outcomes)      25-indicator         Cost models (Indian
+   Rule builder UI         Kronos @ Modal         pure-pandas engine   Budget-2024 / flat-fee)
+```
+
+---
+
+## ✨ Feature Tour
+
+### 1️⃣ Backtester
+- **Strategies:** GRID (price-level laddering), DCA (interval accumulation), PLA (EMA crossover + cascading average-down), 6 indicator presets (RSI, MACD, Bollinger, Supertrend, Donchian, MA-Cross), and fully **custom rule-built strategies**
+- **Markets:** Crypto (Binance / CoinGecko), US stocks (yfinance), Indian NSE/BSE equity, futures & options
+- **Simulator:** Weighted-average cost basis, partial fills when cash is short, lot-size flooring with skip diagnostics
+- **Metrics:** Sharpe, Sortino, Calmar, max drawdown, profit factor, win rate — annualised over 252 trading days
+- **Regime detection:** timeframe-aware bull / bear / sideways labelling, so a 4h and a 1d backtest of the same period agree
+- **Validation:** walk-forward, out-of-sample, Monte Carlo, stress testing
+
+### 2️⃣ Stress Tester
+- Pure-function scenario engine (`apply_stress`) — deep-copies data, never mutates, **persistent drift** so crashes don't snap back into fake profits
+- Per-run severity jitter (`severity × U(0.75, 1.25)`) so Monte Carlo paths fan out realistically in both timing *and* magnitude
+- **Live SSE streaming**: baseline → run × N → complete, rendered incrementally on a high-DPI canvas with hover, click-to-pin and a delta-vs-baseline mode
+
+### 3️⃣ Reel → Backtest (AI pipeline)
+- Transcript ingestion → LLM extraction → **IR validator** (schema + sanity checks) → engine execution → plain-language verdict + improvement suggestions
+- Validated at scale: 100+ real reels processed end-to-end
+
+### 4️⃣ Strategy Intelligence (moat seed)
+- Every backtest appends a `StrategyOutcome` row (strategy, params, symbol, regime mix, outcome metrics) — the training set for a future strategy ranker
+
+---
+
+## 📊 Sample Results (Jan 2022 → Jan 2024)
+
+**Crypto — $10,000 per symbol, 432 optimization runs**
+
+| Symbol | Best Strategy | Return |
+|--------|--------------|-------:|
+| SOL/USDT | DCA (daily, profit-exit 10%) | **+441%** |
+| BTC/USDT | DCA | +159% |
+| BNB/USDT | DCA | +73% |
+| ETH/USDT | DCA | +65% |
+
+**Indian F&O — real lot sizes & Budget-2024 costs, 792 runs**
+
+| Symbol | Best Strategy | Return | Sharpe | Max DD |
+|--------|--------------|-------:|-------:|-------:|
+| HDFCBANK | PLA EMA 12/26 | +31.1% | 1.14 | −12.2% |
+| BANKNIFTY | PLA EMA 9/21 | +30.8% | 1.33 | −14.4% |
+| INFY | PLA EMA 9/21 | +20.4% | **1.62** | −4.6% |
+| RELIANCE | GRID 5-level exp. | +6.1% | 1.56 | −1.5% |
+
+**Stress validation — 207 tests (13 scenarios × 3 strategies × 3 assets × severities)**: LUNA-style collapse is the most dangerous scenario (median −11.8%); DCA/GRID actually *improve* through GFC-style crashes by accumulating the dip.
+
+---
+
+## 🚀 Quick Start
 
 ```bash
-git clone <repo-url>
-cd "TradeVed Backtester"
+git clone https://github.com/HarshitK2814/Backtester-and-Risk-Analytics.git
+cd Backtester-and-Risk-Analytics
 
-# Create and activate virtual environment
-python -m venv venv
-# Windows
-venv\Scripts\activate
-# macOS / Linux
-source venv/bin/activate
-
-# Install dependencies
+# Backend
+python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r backtester/requirements.txt
-```
+cp backtester/.env.example backtester/.env         # all keys optional — runs on Binance/yfinance without any
+cd backtester && python main.py                    # FastAPI on :8000
 
-### 3. Configure environment variables
-
-```bash
-cp backtester/.env.example backtester/.env
-```
-
-Edit `backtester/.env` and fill in your credentials (see [Environment Variables](#environment-variables) below).
-
-> **Note:** Fyers and TradingView credentials are optional. The platform works without them using Binance and yfinance as data sources.
-
-### 4. Install frontend dependencies
-
-```bash
+# Frontend (second terminal)
 cd backtester/frontend
-npm install
+npm install && npm run dev -- --port 5173          # UI on :5173
 ```
 
-### 5. Run the app
+- **UI:** http://localhost:5173 · **Swagger:** http://localhost:8000/docs
 
-Open two terminals:
+Run the test suite:
 
 ```bash
-# Terminal 1 — Backend (FastAPI on :8000)
 cd backtester
-python main.py
+python -m pytest test_all.py -v        # 37 unit/integration tests
+python stress_validation.py           # 207 stress-scenario validations (backend must be running)
 ```
-
-```bash
-# Terminal 2 — Frontend (Vite on :5173)
-cd backtester/frontend
-npm run dev -- --port 5173
-```
-
-- **UI:** http://localhost:5173
-- **API docs (Swagger):** http://localhost:8000/docs
-
-> If port 8000 is already in use, kill the old process first:
-> ```powershell
-> Stop-Process -Id (Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue).OwningProcess -Force -ErrorAction SilentlyContinue
-> ```
 
 ---
 
-## Environment Variables
-
-Copy `.env.example` to `.env` and fill in your values. All fields are optional — the platform runs without them.
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `TV_USERNAME` | No | TradingView email |
-| `TV_PASSWORD` | No | TradingView password |
-| `TV_SESSIONID` | No | TradingView sessionid cookie (for Google OAuth accounts) |
-| `FYERS_CLIENT_ID` | No | Fyers API client ID (free NSE/BSE intraday data) |
-| `FYERS_SECRET_KEY` | No | Fyers API secret key |
-| `FYERS_REDIRECT_URI` | No | Fyers redirect URI (default: `https://fyers.in`) |
-| `FYERS_ACCESS_TOKEN` | No | Fyers access token — expires daily, regenerate as needed |
-
----
-
-## Project Structure
+## 🗂️ Repo Map
 
 ```
 backtester/
-├── main.py                    # FastAPI app — all routes and orchestration
-├── config.py                  # Paths, constants, logging setup
-├── database.py                # SQLAlchemy models + session
-├── models.py                  # Pydantic request/response schemas
-├── run_backtest.py            # CLI entrypoint (no server required)
-├── test_all.py                # 37-test pytest suite
-├── .env.example               # Environment variable template
-│
-├── data/
-│   ├── fetcher.py             # OHLCV fetch: Binance, CoinGecko, yfinance
-│   ├── indian_assets.py       # NSE/BSE symbols, FO_LOT_SIZES, INDEX_MAP
-│   ├── validator.py           # Data quality checks
-│   └── eda.py                 # Exploratory data analysis helpers
-│
-├── strategies/
-│   ├── base.py                # BaseStrategy ABC
-│   ├── grid.py                # Grid strategy
-│   ├── dca.py                 # DCA strategy
-│   └── pla.py                 # PLA (EMA crossover + cascading entries)
-│
+├── main.py                 # FastAPI app — all routes, SSE streaming, orchestration
 ├── engine/
-│   ├── simulator.py           # TradeSimulator — WACB, partial fills, lot-size
-│   ├── cost_models.py         # IndianCostModel (Budget 2024), SimpleCostModel
-│   ├── metrics.py             # Sharpe, Sortino, Calmar, MDD, Profit Factor
-│   ├── regimes.py             # Timeframe-aware regime detection
-│   ├── stress.py              # Stress engine: 13 scenarios + Monte Carlo
-│   └── validation.py          # Walk-forward / out-of-sample engine
-│
-├── optimizer_results/         # CSV + HTML output from optimizer runs
-├── crypto_optimizer.py        # Grid/DCA/PLA sweep on BTC/ETH/BNB/SOL
-├── indian_futures_optimizer.py# Grid/DCA/PLA sweep on NSE F&O (792 runs)
-│
-├── qa_reports/                # QA Excel reports (test coverage, defect log)
-│
-└── frontend/
-    ├── src/
-    │   ├── App.tsx            # Root — page routing (backtest | stress)
-    │   ├── api.ts             # API clients + SSE stream handler
-    │   ├── types.ts           # TypeScript types
-    │   └── components/
-    │       ├── Sidebar.tsx        # Backtest form + Smart Fill
-    │       ├── MetricsGrid.tsx    # Performance metrics display
-    │       ├── TradeLog.tsx       # Trade table (sortable)
-    │       ├── ChartsPanel.tsx    # Equity / drawdown / candlestick charts
-    │       ├── MCPathsCanvas.tsx  # Canvas-based Monte Carlo spaghetti chart
-    │       ├── StressPage.tsx     # Stress page root + SSE state machine
-    │       ├── StressSidebar.tsx  # Stress form + Smart Fill
-    │       └── StressResults.tsx  # Verdict, compare cards, MC panels
-    ├── package.json
-    ├── vite.config.ts
-    └── tailwind.config.js
+│   ├── simulator.py        # WACB trade simulator, partial fills, lot sizes
+│   ├── cost_models.py      # IndianCostModel (Budget 2024) + SimpleCostModel
+│   ├── indicators.py       # 25-indicator pure pandas/numpy engine
+│   ├── metrics.py          # Sharpe / Sortino / Calmar / MDD / PF
+│   ├── regimes.py          # Timeframe-aware regime detection
+│   └── stress.py           # 17 scenario presets, Monte Carlo aggregation
+├── strategies/             # GRID · DCA · PLA · indicator presets · rule-builder
+├── data/                   # Binance / CoinGecko / yfinance fetchers, NSE/BSE assets
+├── reel_extractor.py       # Reel transcript → strategy IR (LLM)
+├── ir_validator.py         # IR schema & sanity validation
+├── improvement_agent.py    # AI strategy-improvement suggestions
+├── test_all.py             # 37-test pytest suite
+├── stress_validation.py    # 207-test stress validation
+└── frontend/               # React 18 + Vite + TS + Tailwind
+    └── src/components/     # Canvas MC charts, RuleBuilder, StressPage, ReelPage…
+kronos_service/             # Kronos foundation-model forecasting (Modal deployment)
 ```
+
+Deeper dives: [ARCHITECTURE.md](ARCHITECTURE.md) · [TECHNICAL_DOCUMENTATION.md](TECHNICAL_DOCUMENTATION.md) · [USER_GUIDE.md](USER_GUIDE.md) · [PRD.md](PRD.md) · [ROADMAP.md](ROADMAP.md)
 
 ---
 
-## API Reference
+## 🧠 Engineering Highlights (for the technically curious judge)
 
-### Backtest
-```
-POST /api/backtest/run             Run a backtest
-GET  /api/strategies               List strategies + default params
-GET  /api/strategies/grid/bounds   Auto-detect GRID price range for a symbol
-GET  /api/india/cost_preview       Preview Indian transaction costs
-```
-
-### Stress Test
-```
-POST /api/stress/run               Sync stress test (all MC runs at once)
-POST /api/stress/stream            SSE streaming stress test (live path updates)
-GET  /api/stress/scenarios         List all 13 scenario presets
-```
-
-### Data
-```
-GET /api/data/{symbol}             Fetch OHLCV data
-GET /api/data/{symbol}/quality     Data quality score
-```
+- **Correctness over convenience:** cost tracking uses a `track=True/False` two-phase call so partial fills never double-count fees; crash scenarios use `persist=True` drift so prices don't snap back and mint fake profits.
+- **Performance:** SSE endpoint offloads every blocking backtest to `asyncio.to_thread`; the MC chart is raw Canvas with incremental drawing and devicePixelRatio scaling — Recharts died at ~100 paths, this handles 1000+.
+- **Extensibility:** strategies self-describe via `parameter_schema()`; the frontend renders forms from `/api/strategies`, so adding a strategy touches **zero** frontend files.
+- **No fragile TA dependencies:** every indicator implemented from scratch in pandas/numpy (SMA-seeded Wilder smoothing matches textbook RSI/ATR/ADX values).
 
 ---
 
-## Strategies
+<div align="center">
 
-### Grid
-Buys when price drops through a level below `lower_bound`; sells when it rises through a level above `upper_bound`. Leave both at `0` to auto-detect from price history with a ±10% pad.
+**Built by [Harshit Kumar](https://github.com/HarshitK2814)**
 
-| Param | Description |
-|-------|-------------|
-| `lower_bound` / `upper_bound` | Price range (0 = auto) |
-| `num_levels` | Number of grid levels |
-| `spacing` | `linear` or `exponential` |
-| `invest_per_level_usd` | Capital per level |
+*If this project impressed you, a ⭐ would make my day.*
 
-### DCA
-Buys a fixed amount at regular time intervals regardless of price direction.
-
-| Param | Description |
-|-------|-------------|
-| `buy_interval_hours` | Interval between buys |
-| `invest_per_buy_usd` | Amount per buy |
-| `hold_days` | Max hold period |
-| `exit_type` | `time` or `profit` |
-| `profit_target_pct` | Exit when profit exceeds this % |
-
-### PLA (EMA crossover + cascading)
-Enters on a golden cross (fast EMA > slow EMA). If price dips after entry, fires cascading buy orders at configured levels. Best with Daily candles.
-
-| Param | Description |
-|-------|-------------|
-| `fast_ema` / `slow_ema` | EMA periods for crossover signal |
-| `entry_levels` | Dip levels for cascading entries e.g. `[0, -1, -2.5, -4]` |
-| `invest_per_level_usd` | Capital per cascade level |
-| `exit_type` | `crossover`, `take_profit`, or `stop_loss` |
-
----
-
-## Indian Market Notes
-
-| Market type | STT | Lot size |
-|-------------|-----|----------|
-| `equity_delivery` | 0.1% both legs | 1 |
-| `equity_intraday` | 0.025% sell only | 1 |
-| `futures` | 0.02% sell only | per symbol |
-| `options` | 0.1% on sell premium | per symbol |
-
-F&O: invest amount must cover at least 1 lot (`lot_size × approx_price`). The backend returns HTTP 422 with the minimum required amount if the capital is insufficient.
-
-Key F&O lot sizes: NIFTY50 = 50, BANKNIFTY = 15, FINNIFTY = 40, SENSEX = 10.
-
----
-
-## Metrics
-
-| Metric | Formula |
-|--------|---------|
-| Sharpe | `mean_daily_return / std × √252` (rf = 0) |
-| Sortino | `mean_daily_return / downside_std × √252` |
-| Calmar | `annualised_return / │max_drawdown│` |
-| Max Drawdown | Rolling peak-to-trough on equity curve |
-| Win Rate | % profitable trades — returned as 0–100 (not 0–1) |
-| Profit Factor | Gross profit / gross loss |
-
----
-
-## Stress Scenarios
-
-17 presets total — 13 global + 4 Indian-market specific.
-
-| Key | Display Name | What it simulates |
-|-----|-------------|-------------------|
-| `gfc_2008` | 2008 GFC Replay | 37% crash over 252 days with 2 partial bounces |
-| `covid_crash` | 2020 COVID Flash Crash | 34% crash in 30 days, 60% recovery over 45 days |
-| `flash_crash_2010` | 2010 Flash Crash | 9% single-day drop + outlier wick events |
-| `luna_collapse` | LUNA-style Collapse | 95% crash in 7 days, no recovery |
-| `liquidity_drought` | Liquidity Drought | Spread/slippage multipliers, no price drift |
-| `pump_dump` | Pump & Dump | 50% pump over 5 days then 60% dump |
-| `whipsaw_chop` | Whipsaw Chop | ±5% mean-reverting chop for 60 days |
-| `slow_bleed` | Slow Bleed Bear | 40% drift down over 180 days |
-| `vol_spike` | Vol Spike (VIX-style) | 3× volatility multiplier for 30 days |
-| `gap_risk` | Gap Risk | 10 random overnight gap events (3–8%) |
-| `range_bound` | Range-bound Consolidation | ±2% mean-reverting chop for 90 days |
-| `trend_reversal` | Trend Exhaustion + Reversal | 25% down then 30% recovery |
-| `outlier_injection` | 20-30% Outlier Injection | 5 random outlier candles (20–30%) |
-| `demonetization_2016` | India Demonetization 2016 | 15% drop over 30d + gap events (Indian markets) |
-| `covid_nifty_mar2020` | COVID NIFTY Crash Mar 2020 | 38% crash + 70% recovery + gap events (NSE) |
-| `yes_bank_2020` | Yes Bank Collapse 2020 | 85% drop over 120d + heavy gap events (NSE) |
-| `expiry_gamma_squeeze` | F&O Expiry Gamma Squeeze | 4× vol + gap + outlier events (F&O specific) |
-
----
-
-## Running Tests
-
-```bash
-# Unit + integration tests (37 tests)
-cd backtester
-python -m pytest test_all.py -v
-```
-
----
-
-## CLI Runner (no server required)
-
-```bash
-python run_backtest.py --symbol BTC/USDT --strategy DCA --start 2022-01-01 --end 2024-01-01
-python run_backtest.py --symbol NIFTY50  --strategy GRID --source nse --capital 500000
-python run_backtest.py --all
-```
-
----
-
-## Optimizers
-
-Pre-built sweep scripts for finding the best strategy + param combinations:
-
-```bash
-# Crypto: Grid/DCA/PLA on BTC/ETH/BNB/SOL (~432 runs, outputs HTML report)
-python crypto_optimizer.py
-
-# Indian F&O: Grid/DCA/PLA on NSE futures (~792 runs)
-python indian_futures_optimizer.py
-```
-
-Results are saved to `optimizer_results/` as CSV and HTML.
+</div>

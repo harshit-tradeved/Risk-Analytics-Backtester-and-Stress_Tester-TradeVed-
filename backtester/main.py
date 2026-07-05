@@ -1198,6 +1198,305 @@ def generate_report_endpoint(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# ── Reel → Backtest endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+
+class FromIRRequest(BaseModel):
+    """Run a full backtest from a Strategy IR (output of /api/reel/analyze)."""
+    strategy_ir:      dict  = Field(..., description="Strategy IR: {strategy, params}")
+    symbol:           str   = Field("BTC/USDT")
+    source:           str   = Field("binance")
+    start_date:       date  = Field(...)
+    end_date:         date  = Field(...)
+    capital:          float = Field(DEFAULT_CAPITAL)
+    fee_pct:          float = Field(DEFAULT_FEE_PERCENT)
+    slippage:         float = Field(DEFAULT_SLIPPAGE_PERCENT)
+    interval:         str   = Field("1d")
+    use_indian_costs: bool  = Field(False)
+    market_type:      str   = Field("equity_delivery")
+    brokerage_model:  str   = Field("flat")
+    brokerage_flat:   float = Field(20.0)
+    brokerage_pct:    float = Field(0.005)
+    validation_mode:  str   = Field("none")
+    train_ratio:      float = Field(0.7)
+    wf_window:        int   = Field(252)
+    wf_step:          int   = Field(63)
+
+
+class ReelAnalyzeRequest(BaseModel):
+    url:        Optional[str] = Field(None, description="Instagram/YouTube/TikTok reel URL")
+    transcript: Optional[str] = Field(None, description="Pre-extracted transcript (skips ingestion)")
+    caption:    Optional[str] = Field(None, description="Post caption / description text")
+
+
+@app.post(f"{API_PREFIX}/strategy/from-ir", tags=["Reel"])
+def backtest_from_ir(req: FromIRRequest, db: Session = Depends(get_db)):
+    """
+    Compile a Strategy IR (from reel extraction or manual entry) into a full backtest.
+    Validates the IR then delegates to the standard backtest engine.
+    """
+    from ir_validator import validate_ir, normalize_ir
+    ir = normalize_ir(req.strategy_ir)
+    errors = validate_ir(ir)
+    if errors:
+        raise HTTPException(422, detail={"message": "Invalid Strategy IR", "ir_errors": errors})
+
+    strategy = str(ir.get("strategy", "CUSTOM")).upper()
+    params   = ir.get("params", {}) or {}
+
+    bt_req = BacktestRequest(
+        symbol           = req.symbol,
+        strategy         = strategy,
+        start_date       = req.start_date,
+        end_date         = req.end_date,
+        capital          = req.capital,
+        fee_pct          = req.fee_pct,
+        slippage         = req.slippage,
+        source           = req.source,
+        interval         = req.interval,
+        params           = params,
+        use_indian_costs = req.use_indian_costs,
+        market_type      = req.market_type,
+        brokerage_model  = req.brokerage_model,
+        brokerage_flat   = req.brokerage_flat,
+        brokerage_pct    = req.brokerage_pct,
+        validation_mode  = req.validation_mode,
+        train_ratio      = req.train_ratio,
+        wf_window        = req.wf_window,
+        wf_step          = req.wf_step,
+    )
+    return run_backtest(bt_req, db)
+
+
+@app.post(f"{API_PREFIX}/reel/analyze", tags=["Reel"])
+async def analyze_reel(req: ReelAnalyzeRequest):
+    """
+    Extract a trading strategy from a reel transcript using a two-prompt LLM pipeline.
+
+    Accepts either:
+      - 'url' — calls the configured ingestion service (INGESTION_API_URL) to get transcript
+      - 'transcript' — use directly (skips ingestion, works without ingestion service)
+
+    Returns triage result + Strategy IR + gaps for user review before running a backtest.
+    """
+    from reel_extractor import triage, extract_strategy_ir
+    from ir_validator import validate_ir
+    from config import INGESTION_API_URL
+
+    transcript = (req.transcript or "").strip()
+    caption    = (req.caption or "").strip()
+
+    # If no transcript, ingest from URL
+    if not transcript:
+        if not req.url:
+            raise HTTPException(400, "Provide either 'transcript' or 'url'")
+        if INGESTION_API_URL:
+            # External ingestion service (friend's deployed API)
+            try:
+                import httpx
+                async with httpx.AsyncClient(timeout=120) as client:
+                    resp = await client.post(
+                        f"{INGESTION_API_URL.rstrip('/')}/extract",
+                        json={"url": req.url},
+                    )
+                    resp.raise_for_status()
+                    data       = resp.json()
+                    transcript = data.get("transcript", "") or data.get("original_source_text", "")
+                    caption    = data.get("caption", caption)
+            except Exception as e:
+                raise HTTPException(502, f"Ingestion service error: {e}")
+        else:
+            # Local ingestion — yt-dlp + ffmpeg + Groq Whisper (ingestion.py)
+            try:
+                from ingestion import handle_url as _ingest_url
+                data = await asyncio.to_thread(_ingest_url, req.url)
+                # prefer original_source_text (on_screen_text + transcript combined)
+                transcript = data.get("original_source_text") or data.get("transcript", "")
+                caption    = data.get("caption", caption)
+            except Exception as e:
+                raise HTTPException(502, f"Ingestion failed: {e}")
+
+    if not transcript:
+        raise HTTPException(400,
+            "No spoken audio or on-screen strategy text could be extracted from this "
+            "content (likely a silent or purely visual video). Try pasting the transcript "
+            "or caption manually instead.")
+
+    # Stage 0 — triage (cheap, runs first)
+    triage_result = await asyncio.to_thread(triage, transcript, caption)
+
+    # A provider/network failure during triage is not a real classification —
+    # surface it as an error instead of silently telling the user "not a strategy".
+    if triage_result.get("provider_error"):
+        raise HTTPException(502, detail={
+            "message": "Triage LLM call failed — could not classify this content. Try again.",
+            "error":   triage_result.get("reason", ""),
+        })
+
+    if not triage_result["is_strategy"]:
+        return _sanitize({
+            "triage":      triage_result,
+            "transcript":  transcript,
+            "strategy_ir": None,
+            "gaps":        [],
+            "confidence":  0.0,
+        })
+
+    # Stage 1+2 — extract Strategy IR
+    extraction = await asyncio.to_thread(extract_strategy_ir, transcript, caption)
+
+    from ir_validator import normalize_ir
+    strategy_ir = extraction.get("strategy_ir")
+    if isinstance(strategy_ir, dict):
+        strategy_ir = normalize_ir(strategy_ir)
+        ir_errors   = validate_ir(strategy_ir)
+    else:
+        ir_errors = ["Extraction did not produce a valid IR"]
+
+    return _sanitize({
+        "triage":              triage_result,
+        "transcript":          transcript,
+        "strategy_ir":         strategy_ir,
+        "gaps":                extraction.get("gaps", []),
+        "confidence":          extraction.get("confidence", 0.0),
+        "ir_errors":           ir_errors,
+        "cleaned":             extraction.get("cleaned"),
+        "suggested_symbol":    extraction.get("suggested_symbol"),
+        "suggested_source":    extraction.get("suggested_source"),
+        "suggested_interval":  extraction.get("suggested_interval"),
+        **({"error": extraction["error"]} if extraction.get("error") else {}),
+    })
+
+
+class ImproveRequest(BaseModel):
+    """Diagnose problems in an already-run reel backtest, propose a fix, re-run it for
+    real, and have an independent Judge LLM audit the whole trace."""
+    strategy_ir:      dict            = Field(..., description="The IR that was originally backtested")
+    original_metrics: dict            = Field(..., description="The 'results' dict from that backtest")
+    gaps:             list[str]       = Field(default_factory=list)
+    transcript:       Optional[str]   = Field(None)
+    symbol:           str             = Field("BTC/USDT")
+    source:           str             = Field("binance")
+    start_date:       date            = Field(...)
+    end_date:         date            = Field(...)
+    capital:          float           = Field(DEFAULT_CAPITAL)
+    fee_pct:          float           = Field(DEFAULT_FEE_PERCENT)
+    slippage:         float           = Field(DEFAULT_SLIPPAGE_PERCENT)
+    interval:         str             = Field("1d")
+    use_indian_costs: bool            = Field(False)
+    market_type:      str             = Field("equity_delivery")
+    brokerage_model:  str             = Field("flat")
+    brokerage_flat:   float           = Field(20.0)
+    brokerage_pct:    float           = Field(0.005)
+
+
+@app.post(f"{API_PREFIX}/reel/improve", tags=["Reel"])
+def improve_reel_strategy(req: ImproveRequest, db: Session = Depends(get_db)):
+    """
+    Diagnose → improve → re-run → diff → judge, end to end.
+
+    1. Critique LLM names concrete problems in the ALREADY-COMPUTED original
+       metrics and proposes a modified `improved_ir`.
+    2. `improved_ir` is validated (with one LLM self-repair retry) then
+       actually re-run through the same deterministic backtest engine, on the
+       identical symbol/dates/capital — so the "improved" numbers are real,
+       not predicted.
+    3. The diff between original and improved metrics is computed with plain
+       arithmetic (no LLM).
+    4. An independent Judge LLM audits the full trace for honesty,
+       consistency, and overfitting risk before the result is returned.
+    """
+    from ir_validator import validate_ir, normalize_ir
+    from improvement_agent import critique_and_improve, repair_improved_ir, compute_diff, judge_pipeline
+
+    original_ir = req.strategy_ir
+
+    critique = critique_and_improve(
+        ir=original_ir,
+        metrics=req.original_metrics,
+        gaps=req.gaps,
+        symbol=req.symbol,
+        interval=req.interval,
+    )
+    if critique.get("error") or not critique.get("improved_ir"):
+        raise HTTPException(502, detail={
+            "message": "Critique LLM failed to produce an improved strategy",
+            "error":   critique.get("error", "no improved_ir returned"),
+        })
+
+    improved_ir = normalize_ir(critique["improved_ir"])
+    ir_errors   = validate_ir(improved_ir)
+    if ir_errors:
+        repaired = repair_improved_ir(improved_ir, ir_errors, original_ir)
+        if repaired:
+            repaired = normalize_ir(repaired)
+            retry_errors = validate_ir(repaired)
+            if not retry_errors:
+                improved_ir = repaired
+                ir_errors = []
+            else:
+                ir_errors = retry_errors
+    if ir_errors:
+        raise HTTPException(422, detail={
+            "message": "Improved Strategy IR failed validation twice — no fabricated result returned",
+            "ir_errors": ir_errors,
+            "problems": critique.get("problems", []),
+        })
+
+    strategy = str(improved_ir.get("strategy", "CUSTOM")).upper()
+    params   = improved_ir.get("params", {}) or {}
+
+    bt_req = BacktestRequest(
+        symbol           = req.symbol,
+        strategy         = strategy,
+        start_date       = req.start_date,
+        end_date         = req.end_date,
+        capital          = req.capital,
+        fee_pct          = req.fee_pct,
+        slippage         = req.slippage,
+        source           = req.source,
+        interval         = req.interval,
+        params           = params,
+        use_indian_costs = req.use_indian_costs,
+        market_type      = req.market_type,
+        brokerage_model  = req.brokerage_model,
+        brokerage_flat   = req.brokerage_flat,
+        brokerage_pct    = req.brokerage_pct,
+        validation_mode  = "none",
+    )
+    improved_result = run_backtest(bt_req, db)
+
+    diff = compute_diff(req.original_metrics, improved_result["results"])
+
+    judge = judge_pipeline({
+        "transcript":        (req.transcript or "")[:1500],
+        "original_ir":       original_ir,
+        "improved_ir":       improved_ir,
+        "problems":          critique.get("problems", []),
+        "changes":           critique.get("changes", []),
+        "original_metrics":  req.original_metrics,
+        "improved_metrics":  improved_result["results"],
+        "diff":              diff,
+        "config": {
+            "symbol": req.symbol, "source": req.source, "interval": req.interval,
+            "start_date": str(req.start_date), "end_date": str(req.end_date),
+            "capital": req.capital,
+        },
+    })
+
+    return _sanitize({
+        "problems":        critique.get("problems", []),
+        "changes":         critique.get("changes", []),
+        "confidence":      critique.get("confidence", 0.0),
+        "original_ir":     original_ir,
+        "improved_ir":     improved_ir,
+        "improved_result": improved_result,
+        "diff":            diff,
+        "judge":           judge,
+    })
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # ── Stress Test endpoint
 # ─────────────────────────────────────────────────────────────────────────────
 

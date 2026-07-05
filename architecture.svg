@@ -1,0 +1,137 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2340" height="1060" viewBox="0 0 2340 1060" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+<defs>
+  <marker id="arr"  markerWidth="12" markerHeight="12" refX="9" refY="5" orient="auto">
+    <path d="M0,0 L10,5 L0,10 z" fill="#52606d"/></marker>
+  <marker id="arrA" markerWidth="13" markerHeight="13" refX="9" refY="5" orient="auto">
+    <path d="M0,0 L10,5 L0,10 z" fill="#3b5bdb"/></marker>
+  <marker id="arrU" markerWidth="11" markerHeight="11" refX="8" refY="5" orient="auto">
+    <path d="M0,0 L10,5 L0,10 z" fill="#0d7d8c"/></marker>
+</defs>
+<rect x="0" y="0" width="2340" height="1060" rx="0" ry="0" fill="#ffffff" stroke="#ffffff" stroke-width="0"/>
+<text x="50" y="50" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="30" fill="#1f2933" font-weight="bold" font-style="normal" text-anchor="start">Reel → Honest Backtest</text>
+<text x="52" y="78" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" fill="#52606d" font-weight="normal" font-style="italic" text-anchor="start">system architecture · a novice pastes a trading-strategy reel; the platform understands it, compiles it onto our existing engine, and returns an honest verdict</text>
+<rect x="2146.0" y="36" width="15" height="15" rx="4" ry="4" fill="#eef2f7" stroke="#334e68" stroke-width="1.4"/>
+<text x="2167.0" y="48" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" fill="#1f2933" font-weight="normal" font-style="normal" text-anchor="start">existing engine</text>
+<rect x="2041.2" y="36" width="15" height="15" rx="4" ry="4" fill="#fdecea" stroke="#c0392b" stroke-width="1.4"/>
+<text x="2062.2" y="48" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" fill="#1f2933" font-weight="normal" font-style="normal" text-anchor="start">to build</text>
+<rect x="1944.0" y="36" width="15" height="15" rx="4" ry="4" fill="#fdf6e3" stroke="#b07d12" stroke-width="1.4"/>
+<text x="1965.0" y="48" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" fill="#1f2933" font-weight="normal" font-style="normal" text-anchor="start">partial</text>
+<rect x="1862.0" y="36" width="15" height="15" rx="4" ry="4" fill="#e9f7ef" stroke="#1b7f4b" stroke-width="1.4"/>
+<text x="1883.0" y="48" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" fill="#1f2933" font-weight="normal" font-style="normal" text-anchor="start">built</text>
+<text x="50" y="116" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" fill="#c0392b" font-weight="bold" font-style="normal" text-anchor="start">REEL UNDERSTANDING — the new build</text>
+<text x="1344.857142857143" y="116" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" fill="#1b7f4b" font-weight="bold" font-style="normal" text-anchor="start">EXISTING ENGINE — already shipped</text>
+<line x1="1331.857142857143" y1="130" x2="1331.857142857143" y2="870" stroke="#d7b8b0" stroke-width="1.4" stroke-dasharray="3 7"/>
+<text x="50" y="178" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" fill="#0d7d8c" font-weight="bold" font-style="normal" text-anchor="start">USER</text>
+<rect x="441.1714285714286" y="150" width="162.8" height="44" rx="22" ry="22" fill="#e6f6f8" stroke="#0d7d8c" stroke-width="1.6"/>
+<text x="522.5714285714286" y="177" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.8" fill="#0d7d8c" font-weight="bold" font-style="normal" text-anchor="middle">① paste a reel link</text>
+<line x1="522.5714285714286" y1="194" x2="522.5714285714286" y2="470" stroke="#0d7d8c" stroke-width="1.4" stroke-dasharray="2 6" marker-end="url(#arrU)"/>
+<rect x="800.7428571428571" y="150" width="414.8" height="44" rx="22" ry="22" fill="#e6f6f8" stroke="#0d7d8c" stroke-width="1.6"/>
+<text x="1008.1428571428571" y="177" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.8" fill="#0d7d8c" font-weight="bold" font-style="normal" text-anchor="middle">② review &amp; edit the draft strategy (human-in-the-loop)</text>
+<line x1="1008.1428571428571" y1="194" x2="1008.1428571428571" y2="470" stroke="#0d7d8c" stroke-width="1.4" stroke-dasharray="2 6" marker-end="url(#arrU)"/>
+<rect x="2012.9428571428568" y="150" width="256.4" height="44" rx="22" ry="22" fill="#e6f6f8" stroke="#0d7d8c" stroke-width="1.6"/>
+<text x="2141.142857142857" y="177" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.8" fill="#0d7d8c" font-weight="bold" font-style="normal" text-anchor="middle">③ read verdict · save to library</text>
+<line x1="2141.142857142857" y1="194" x2="2141.142857142857" y2="470" stroke="#0d7d8c" stroke-width="1.4" stroke-dasharray="2 6" marker-end="url(#arrU)"/>
+<rect x="683.4285714285714" y="430" width="1296.8571428571431" height="400" rx="20" ry="20" fill="none" stroke="#3b5bdb" stroke-width="2.0" stroke-dasharray="8 6"/>
+<text x="699.4285714285714" y="454" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14.5" fill="#3b5bdb" font-weight="bold" font-style="normal" text-anchor="start">ORCHESTRATOR</text>
+<text x="833.4285714285714" y="454" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#3b5bdb" font-weight="normal" font-style="italic" text-anchor="start">· agent + evaluator loop — runs stages 02→05, checks the eval gates, and on a faithfulness / significance failure refines the IR and re-runs (bounded retries)</text>
+<line x1="1817.4285714285716" y1="720" x2="1817.4285714285716" y2="790" stroke="#3b5bdb" stroke-width="2.2"/>
+<line x1="1817.4285714285716" y1="790" x2="846.2857142857143" y2="790" stroke="#3b5bdb" stroke-width="2.2"/>
+<line x1="846.2857142857143" y1="790" x2="846.2857142857143" y2="720" stroke="#3b5bdb" stroke-width="2.2" marker-end="url(#arrA)"/>
+<text x="1331.857142857143" y="782" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" fill="#3b5bdb" font-weight="bold" font-style="italic" text-anchor="middle">refine ↺  (re-extract with the failure as feedback)</text>
+<rect x="50.0" y="470" width="297.7142857142857" height="250" rx="16" ry="16" fill="#fdecea" stroke="#c0392b" stroke-width="2.0"/>
+<text x="68.0" y="502" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16.5" fill="#1f2933" font-weight="bold" font-style="normal" text-anchor="start">00 · TRIAGE</text>
+<rect x="261.7142857142857" y="484" width="72.0" height="22" rx="11" ry="11" fill="#ffffff" stroke="#c0392b" stroke-width="1.3"/>
+<text x="297.7142857142857" y="499" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#c0392b" font-weight="bold" font-style="normal" text-anchor="middle">TO BUILD</text>
+<text x="68.0" y="536" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">–  “is this even a strategy?”</text>
+<text x="68.0" y="557" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">–  reject hype / ads / talk</text>
+<text x="68.0" y="578" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">–  ~70% of reels fail here</text>
+<rect x="373.7142857142857" y="470" width="297.7142857142857" height="250" rx="16" ry="16" fill="#fdecea" stroke="#c0392b" stroke-width="2.0"/>
+<text x="391.7142857142857" y="502" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16.5" fill="#1f2933" font-weight="bold" font-style="normal" text-anchor="start">01 · INGEST</text>
+<rect x="585.4285714285714" y="484" width="72.0" height="22" rx="11" ry="11" fill="#ffffff" stroke="#c0392b" stroke-width="1.3"/>
+<text x="621.4285714285714" y="499" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#c0392b" font-weight="bold" font-style="normal" text-anchor="middle">TO BUILD</text>
+<text x="391.7142857142857" y="536" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">–  yt-dlp → audio·frames·caption</text>
+<text x="391.7142857142857" y="557" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">–  Whisper STT (Hinglish)</text>
+<text x="391.7142857142857" y="578" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">–  frame OCR · cache by reel-ID</text>
+<rect x="697.4285714285714" y="470" width="297.7142857142857" height="250" rx="16" ry="16" fill="#fdecea" stroke="#c0392b" stroke-width="2.0"/>
+<text x="715.4285714285714" y="502" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16.5" fill="#1f2933" font-weight="bold" font-style="normal" text-anchor="start">02 · EXTRACT</text>
+<rect x="909.1428571428571" y="484" width="72.0" height="22" rx="11" ry="11" fill="#ffffff" stroke="#c0392b" stroke-width="1.3"/>
+<text x="945.1428571428571" y="499" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#c0392b" font-weight="bold" font-style="normal" text-anchor="middle">TO BUILD</text>
+<text x="715.4285714285714" y="536" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">–  2-prompt LLM → Strategy IR</text>
+<text x="715.4285714285714" y="557" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">–  gap-flag, never invent a param</text>
+<text x="715.4285714285714" y="578" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">–  human reviews draft IR</text>
+<rect x="1021.1428571428571" y="470" width="297.7142857142857" height="250" rx="16" ry="16" fill="#fdf6e3" stroke="#b07d12" stroke-width="2.0"/>
+<text x="1039.142857142857" y="502" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16.5" fill="#1f2933" font-weight="bold" font-style="normal" text-anchor="start">03 · COMPILE</text>
+<rect x="1239.857142857143" y="484" width="65.0" height="22" rx="11" ry="11" fill="#ffffff" stroke="#b07d12" stroke-width="1.3"/>
+<text x="1272.357142857143" y="499" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#b07d12" font-weight="bold" font-style="normal" text-anchor="middle">PARTIAL</text>
+<text x="1039.142857142857" y="536" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">–  map IR → preset / Custom</text>
+<text x="1039.142857142857" y="557" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">–  validate vs indicator catalog</text>
+<text x="1039.142857142857" y="578" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">–  Pine Script export (optional)</text>
+<rect x="1344.857142857143" y="470" width="297.7142857142857" height="250" rx="16" ry="16" fill="#e9f7ef" stroke="#1b7f4b" stroke-width="2.0"/>
+<text x="1362.857142857143" y="502" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16.5" fill="#1f2933" font-weight="bold" font-style="normal" text-anchor="start">04 · BACKTEST</text>
+<rect x="1577.5714285714287" y="484" width="51.0" height="22" rx="11" ry="11" fill="#ffffff" stroke="#1b7f4b" stroke-width="1.3"/>
+<text x="1603.0714285714287" y="499" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#1b7f4b" font-weight="bold" font-style="normal" text-anchor="middle">BUILT</text>
+<text x="1362.857142857143" y="536" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">–  simulator · WACB · lot sizes</text>
+<text x="1362.857142857143" y="557" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">–  Indian cost model · honest costs</text>
+<text x="1362.857142857143" y="578" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">–  54 strategies · regimes</text>
+<rect x="1668.5714285714287" y="470" width="297.7142857142857" height="250" rx="16" ry="16" fill="#e9f7ef" stroke="#1b7f4b" stroke-width="2.0"/>
+<text x="1686.5714285714287" y="502" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16.5" fill="#1f2933" font-weight="bold" font-style="normal" text-anchor="start">05 · EVALUATE</text>
+<rect x="1901.2857142857144" y="484" width="51.0" height="22" rx="11" ry="11" fill="#ffffff" stroke="#1b7f4b" stroke-width="1.3"/>
+<text x="1926.7857142857144" y="499" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#1b7f4b" font-weight="bold" font-style="normal" text-anchor="middle">BUILT</text>
+<text x="1686.5714285714287" y="536" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">–  Sharpe / MDD / PF vs buy&amp;hold</text>
+<text x="1686.5714285714287" y="557" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">–  walk-fwd · MC · stress · Kronos</text>
+<text x="1686.5714285714287" y="578" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">–  leakage + faithfulness gate</text>
+<rect x="1992.2857142857142" y="470" width="297.7142857142857" height="250" rx="16" ry="16" fill="#fdf6e3" stroke="#b07d12" stroke-width="2.0"/>
+<text x="2010.2857142857142" y="502" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16.5" fill="#1f2933" font-weight="bold" font-style="normal" text-anchor="start">06 · REPORT</text>
+<rect x="2211.0" y="484" width="65.0" height="22" rx="11" ry="11" fill="#ffffff" stroke="#b07d12" stroke-width="1.3"/>
+<text x="2243.5" y="499" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#b07d12" font-weight="bold" font-style="normal" text-anchor="middle">PARTIAL</text>
+<text x="2010.2857142857142" y="536" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">–  plain-language verdict</text>
+<text x="2010.2857142857142" y="557" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">–  equity / drawdown / MC charts</text>
+<text x="2010.2857142857142" y="578" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">–  disclaimer · save to library</text>
+<line x1="349.7142857142857" y1="595.0" x2="371.7142857142857" y2="595.0" stroke="#52606d" stroke-width="2.0" marker-end="url(#arr)"/>
+<rect x="316.2142857142857" y="579.0" width="89.0" height="30" rx="15" ry="15" fill="#efe9fb" stroke="#5a3e9c" stroke-width="1.4"/>
+<text x="360.7142857142857" y="599.0" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11.8" fill="#5a3e9c" font-weight="bold" font-style="normal" text-anchor="middle">valid reel</text>
+<line x1="673.4285714285714" y1="595.0" x2="695.4285714285714" y2="595.0" stroke="#52606d" stroke-width="2.0" marker-end="url(#arr)"/>
+<rect x="616.4785714285714" y="579.0" width="135.9" height="30" rx="15" ry="15" fill="#efe9fb" stroke="#5a3e9c" stroke-width="1.4"/>
+<text x="684.4285714285714" y="599.0" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11.8" fill="#5a3e9c" font-weight="bold" font-style="normal" text-anchor="middle">multimodal bundle</text>
+<line x1="997.1428571428571" y1="595.0" x2="1019.1428571428571" y2="595.0" stroke="#52606d" stroke-width="2.0" marker-end="url(#arr)"/>
+<rect x="936.8428571428572" y="579.0" width="142.60000000000002" height="30" rx="15" ry="15" fill="#efe9fb" stroke="#5a3e9c" stroke-width="1.4"/>
+<text x="1008.1428571428571" y="599.0" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11.8" fill="#5a3e9c" font-weight="bold" font-style="normal" text-anchor="middle">Strategy IR (JSON)</text>
+<line x1="1320.857142857143" y1="595.0" x2="1342.857142857143" y2="595.0" stroke="#52606d" stroke-width="2.0" marker-end="url(#arr)"/>
+<rect x="1247.1571428571428" y="579.0" width="169.4" height="30" rx="15" ry="15" fill="#efe9fb" stroke="#5a3e9c" stroke-width="1.4"/>
+<text x="1331.857142857143" y="599.0" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11.8" fill="#5a3e9c" font-weight="bold" font-style="normal" text-anchor="middle">registry / Custom call</text>
+<line x1="1644.5714285714287" y1="595.0" x2="1666.5714285714287" y2="595.0" stroke="#52606d" stroke-width="2.0" marker-end="url(#arr)"/>
+<rect x="1594.3214285714287" y="579.0" width="122.5" height="30" rx="15" ry="15" fill="#efe9fb" stroke="#5a3e9c" stroke-width="1.4"/>
+<text x="1655.5714285714287" y="599.0" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11.8" fill="#5a3e9c" font-weight="bold" font-style="normal" text-anchor="middle">trades + equity</text>
+<line x1="1968.2857142857144" y1="595.0" x2="1990.2857142857142" y2="595.0" stroke="#52606d" stroke-width="2.0" marker-end="url(#arr)"/>
+<rect x="1918.0357142857142" y="579.0" width="122.5" height="30" rx="15" ry="15" fill="#efe9fb" stroke="#5a3e9c" stroke-width="1.4"/>
+<text x="1979.2857142857142" y="599.0" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11.8" fill="#5a3e9c" font-weight="bold" font-style="normal" text-anchor="middle">metrics + gates</text>
+<text x="198.85714285714286" y="458" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" fill="#52606d" font-weight="bold" font-style="normal" text-anchor="middle">▶ reel URL</text>
+<text x="2141.142857142857" y="746" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" fill="#1b7f4b" font-weight="bold" font-style="normal" text-anchor="middle">honest verdict → user</text>
+<rect x="50" y="880" width="2240" height="150" rx="16" ry="16" fill="#eef2f7" stroke="#334e68" stroke-width="2.0"/>
+<text x="70" y="908" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" fill="#334e68" font-weight="bold" font-style="normal" text-anchor="start">PLATFORM &amp; INFRASTRUCTURE</text>
+<text x="320" y="908" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12.5" fill="#52606d" font-weight="normal" font-style="italic" text-anchor="start">· cross-cutting — every stage above runs on this foundation</text>
+<text x="70.0" y="944" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" fill="#1f2933" font-weight="bold" font-style="normal" text-anchor="start">Async job queue</text>
+<text x="70.0" y="964" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">Redis / RQ — STT, backtest,</text>
+<text x="70.0" y="981" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">Kronos are slow (Roadmap K2)</text>
+<line x1="426.6666666666667" y1="924" x2="426.6666666666667" y2="1016" stroke="#c3ccd6" stroke-width="1.2"/>
+<text x="436.6666666666667" y="944" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" fill="#1f2933" font-weight="bold" font-style="normal" text-anchor="start">Datastore</text>
+<text x="436.6666666666667" y="964" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">Postgres · Strategy-IR store ·</text>
+<text x="436.6666666666667" y="981" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">results · outcome log (moat)</text>
+<line x1="793.3333333333334" y1="924" x2="793.3333333333334" y2="1016" stroke="#c3ccd6" stroke-width="1.2"/>
+<text x="803.3333333333334" y="944" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" fill="#1f2933" font-weight="bold" font-style="normal" text-anchor="start">Caching</text>
+<text x="803.3333333333334" y="964" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">reel download · STT · market</text>
+<text x="803.3333333333334" y="981" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">data · forecast paths · results</text>
+<line x1="1160.0" y1="924" x2="1160.0" y2="1016" stroke="#c3ccd6" stroke-width="1.2"/>
+<text x="1170.0" y="944" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" fill="#1f2933" font-weight="bold" font-style="normal" text-anchor="start">Security</text>
+<text x="1170.0" y="964" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">validate IR vs catalog ·</text>
+<text x="1170.0" y="981" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">sandbox · no arbitrary exec</text>
+<line x1="1526.6666666666667" y1="924" x2="1526.6666666666667" y2="1016" stroke="#c3ccd6" stroke-width="1.2"/>
+<text x="1536.6666666666667" y="944" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" fill="#1f2933" font-weight="bold" font-style="normal" text-anchor="start">Model providers</text>
+<text x="1536.6666666666667" y="964" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">LLM (extract) · Whisper STT ·</text>
+<text x="1536.6666666666667" y="981" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">OCR · Kronos GPU on Modal</text>
+<line x1="1893.3333333333335" y1="924" x2="1893.3333333333335" y2="1016" stroke="#c3ccd6" stroke-width="1.2"/>
+<text x="1903.3333333333335" y="944" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" fill="#1f2933" font-weight="bold" font-style="normal" text-anchor="start">Observability</text>
+<text x="1903.3333333333335" y="964" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">Sentry · eval metrics ·</text>
+<text x="1903.3333333333335" y="981" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11.3" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">LLM + GPU cost tracking</text>
+<text x="50" y="1046" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#52606d" font-weight="normal" font-style="normal" text-anchor="start">TradeVed Backtester · horizontal swimlane architecture · regenerate via  python build_architecture.py</text>
+</svg>

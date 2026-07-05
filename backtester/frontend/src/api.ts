@@ -1,7 +1,7 @@
 import {
   AdminEvent, AdminFeedback, AdminSummary, BacktestResponse, FormState,
   StressFormState, StressResponse, StrategyMeta, IndicatorCatalog, CLASSIC_STRATEGIES,
-  ForecastFormState, ForecastResponse,
+  ForecastFormState, ForecastResponse, ReelAnalysisResponse, StrategyIR,
 } from './types';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? '';
@@ -680,5 +680,98 @@ export async function fetchAdminFeedback(token: string): Promise<AdminFeedback[]
   });
   if (res.status === 401) throw new Error('Unauthorized');
   if (!res.ok) throw new Error(`Server ${res.status}`);
+  return res.json();
+}
+
+// ── Reel → Backtest API ───────────────────────────────────────────────────────
+
+/** POST /api/reel/analyze — extract a Strategy IR from a transcript or URL */
+export async function analyzeReel(
+  opts: { url?: string; transcript?: string; caption?: string },
+): Promise<ReelAnalysisResponse> {
+  const res = await fetch(`${API_BASE}/api/reel/analyze`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify(opts),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail ?? `Server ${res.status}`);
+  }
+  return res.json();
+}
+
+/** POST /api/strategy/from-ir — run a full backtest from a confirmed Strategy IR */
+export async function backtestFromIR(
+  ir: StrategyIR,
+  opts: {
+    symbol: string; source: string; interval: string;
+    startDate: string; endDate: string; capital: number;
+    feePct?: number; slippagePct?: number;
+    useIndianCosts?: boolean; marketType?: string;
+  },
+): Promise<BacktestResponse> {
+  const indian = opts.useIndianCosts ?? false;
+  const res = await fetch(`${API_BASE}/api/strategy/from-ir`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      strategy_ir:      ir,
+      symbol:           opts.symbol,
+      source:           opts.source,
+      interval:         opts.interval,
+      start_date:       opts.startDate,
+      end_date:         opts.endDate,
+      capital:          opts.capital,
+      fee_pct:          indian ? 0 : (opts.feePct ?? 0.001),
+      slippage:         opts.slippagePct ?? 0.001,
+      use_indian_costs: indian,
+      market_type:      opts.marketType ?? 'equity_delivery',
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail?.message ?? err.detail ?? `Server ${res.status}`);
+  }
+  return res.json();
+}
+
+/** POST /api/reel/improve — diagnose, improve, re-run, diff, and judge a reel backtest */
+export async function improveReelStrategy(
+  ir: StrategyIR,
+  originalMetrics: object,
+  opts: {
+    gaps?: string[]; transcript?: string;
+    symbol: string; source: string; interval: string;
+    startDate: string; endDate: string; capital: number;
+    feePct?: number; slippagePct?: number;
+    useIndianCosts?: boolean; marketType?: string;
+  },
+): Promise<import('./types').ImproveResponse> {
+  const indian = opts.useIndianCosts ?? false;
+  const res = await fetch(`${API_BASE}/api/reel/improve`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      strategy_ir:      ir,
+      original_metrics: originalMetrics,
+      gaps:             opts.gaps ?? [],
+      transcript:       opts.transcript,
+      symbol:           opts.symbol,
+      source:           opts.source,
+      interval:         opts.interval,
+      start_date:       opts.startDate,
+      end_date:         opts.endDate,
+      capital:          opts.capital,
+      fee_pct:          indian ? 0 : (opts.feePct ?? 0.001),
+      slippage:         opts.slippagePct ?? 0.001,
+      use_indian_costs: indian,
+      market_type:      opts.marketType ?? 'equity_delivery',
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail?.message ?? err.detail ?? `Server ${res.status}`);
+  }
   return res.json();
 }

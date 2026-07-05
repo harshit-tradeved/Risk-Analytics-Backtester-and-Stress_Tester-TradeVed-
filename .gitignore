@@ -62,3 +62,25 @@ frontend/playwright.config.ts
 admin_token.txt
 *token*.txt
 *.secret
+.vercel
+cookies.txt
+*cookies*.txt
+
+# Reports, docs & presentations (kept locally, never pushed)
+*.docx
+*.pdf
+*.xlsx
+*.jsonl
+qa_reports/
+deck_shots/
+screenshots/
+
+# One-off report/PPT builder scripts (root only)
+/build_ai_docs.py
+/build_monthly_report.py
+/build_paper.py
+/build_report.py
+/build_week4_ppt.py
+/build_week5_ppt.py
+/build_week5_report.py
+/build_architecture.py

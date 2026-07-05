@@ -34,7 +34,7 @@ from typing import Any, Callable
 import numpy as np
 import pandas as pd
 
-GROUPS = ("overlap", "momentum", "trend", "volatility", "volume")
+GROUPS = ("overlap", "momentum", "trend", "volatility", "volume", "structure")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -353,8 +353,12 @@ def _keltner(df, length=20, multiplier=2.0):
 def _donchian(df, length=20):
     length = int(length)
     high, low = _series(df, "high"), _series(df, "low")
-    upper = high.rolling(length, min_periods=length).max()
-    lower = low.rolling(length, min_periods=length).min()
+    # Shift by 1 so dc_upper/dc_lower reflect the PREVIOUS period's channel extremes.
+    # This is the standard Donchian convention for breakout signals: today's close
+    # vs yesterday's N-period high/low. Without the shift, close can never exceed
+    # dc_upper (since close <= high always), making cross_above impossible.
+    upper = high.rolling(length, min_periods=length).max().shift(1)
+    lower = low.rolling(length, min_periods=length).min().shift(1)
     return _frame({"dc_lower": lower, "dc_mid": (upper + lower) / 2.0, "dc_upper": upper}, df)
 
 
@@ -394,6 +398,79 @@ def _cmf(df, length=20):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Support/Resistance & session-structure
+# ─────────────────────────────────────────────────────────────────────────────
+# Added to cover a real coverage gap found via reel_pipeline_test_results_100.xlsx
+# (148-URL run): "draw support/resistance", "opening range breakout", and
+# "Ichimoku cloud" strategy content was correctly identified by triage as real
+# strategy content but couldn't be expressed as a rule — these three make the
+# most common of those patterns expressible.
+
+def _pivot(df, length=1):
+    """
+    Classic floor pivot points, computed from the PRIOR `length`-period
+    high/low/close and held constant for the current bar (no look-ahead —
+    length=1 on daily candles reproduces the textbook daily pivot).
+    """
+    length = int(length)
+    high, low, close = _series(df, "high"), _series(df, "low"), _series(df, "close")
+    prev_high  = high.rolling(length, min_periods=length).max().shift(1)
+    prev_low   = low.rolling(length, min_periods=length).min().shift(1)
+    prev_close = close.shift(length)
+    pivot = (prev_high + prev_low + prev_close) / 3.0
+    r1 = 2 * pivot - prev_low
+    s1 = 2 * pivot - prev_high
+    r2 = pivot + (prev_high - prev_low)
+    s2 = pivot - (prev_high - prev_low)
+    return _frame({"pivot": pivot, "pivot_r1": r1, "pivot_r2": r2,
+                   "pivot_s1": s1, "pivot_s2": s2}, df)
+
+
+def _orb(df, opening_candles=15):
+    """
+    Opening Range Breakout: the high/low of the first `opening_candles` bars
+    of each session (grouped by calendar date of `timestamp`), held constant
+    for the rest of that session. NaN during the opening range itself (the
+    range isn't known yet — masking this avoids look-ahead leakage).
+    """
+    n = int(opening_candles)
+    if "timestamp" not in df.columns:
+        nan_col = pd.Series(np.nan, index=df.index)
+        return _frame({"orb_high": nan_col, "orb_low": nan_col}, df)
+    date = pd.to_datetime(df["timestamp"]).dt.date
+    high, low = _series(df, "high"), _series(df, "low")
+    day_idx = date.groupby(date).cumcount()
+    or_high = high.where(day_idx < n).groupby(date).transform("max")
+    or_low  = low.where(day_idx < n).groupby(date).transform("min")
+    or_high = or_high.where(day_idx >= n)
+    or_low  = or_low.where(day_idx >= n)
+    return _frame({"orb_high": or_high, "orb_low": or_low}, df)
+
+
+def _ichimoku(df, tenkan=9, kijun=26, senkou_b=52):
+    """
+    Ichimoku Cloud. tenkan_sen/kijun_sen are the standard midpoint lines.
+    senkou_a/senkou_b are shifted FORWARD by `kijun` periods to match how the
+    cloud is plotted relative to price — at bar t this uses only data up to
+    t-kijun, so it's not look-ahead. Chikou span is intentionally omitted:
+    it's conventionally read by eye against past price, not used as a
+    forward rule input, and including it as a same-index column would
+    require a backward shift that leaks future closes.
+    """
+    tenkan, kijun, senkou_b = int(tenkan), int(kijun), int(senkou_b)
+    high, low = _series(df, "high"), _series(df, "low")
+    tenkan_sen = (high.rolling(tenkan, min_periods=tenkan).max()
+                  + low.rolling(tenkan, min_periods=tenkan).min()) / 2.0
+    kijun_sen = (high.rolling(kijun, min_periods=kijun).max()
+                 + low.rolling(kijun, min_periods=kijun).min()) / 2.0
+    senkou_a = ((tenkan_sen + kijun_sen) / 2.0).shift(kijun)
+    senkou_b_line = ((high.rolling(senkou_b, min_periods=senkou_b).max()
+                       + low.rolling(senkou_b, min_periods=senkou_b).min()) / 2.0).shift(kijun)
+    return _frame({"tenkan_sen": tenkan_sen, "kijun_sen": kijun_sen,
+                   "senkou_a": senkou_a, "senkou_b": senkou_b_line}, df)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Dispatch + helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -411,6 +488,7 @@ _DISPATCH: dict[str, Callable[..., pd.DataFrame]] = {
     "adx": _adx, "aroon": _aroon, "supertrend": _supertrend, "psar": _psar,
     "atr": _atr, "bbands": _bbands, "keltner": _keltner, "donchian": _donchian, "stdev": _stdev,
     "obv": _obv, "mfi": _mfi, "cmf": _cmf,
+    "pivot": _pivot, "orb": _orb, "ichimoku": _ichimoku,
 }
 
 
@@ -507,6 +585,16 @@ INDICATOR_CATALOG: list[dict[str, Any]] = [
      "params": [_p("length", 14, 2, 100)], "outputs": ["mfi"]},
     {"key": "cmf", "label": "Chaikin Money Flow", "group": "volume",
      "params": [_p("length", 20, 2, 200)], "outputs": ["cmf"]},
+    # ── Structure (support/resistance & session) ──
+    {"key": "pivot", "label": "Pivot Points (Classic)", "group": "structure",
+     "params": [_p("length", 1, 1, 200)],
+     "outputs": ["pivot", "pivot_r1", "pivot_r2", "pivot_s1", "pivot_s2"]},
+    {"key": "orb", "label": "Opening Range Breakout (intraday intervals only)", "group": "structure",
+     "params": [_p("opening_candles", 15, 1, 200)],
+     "outputs": ["orb_high", "orb_low"]},
+    {"key": "ichimoku", "label": "Ichimoku Cloud", "group": "structure",
+     "params": [_p("tenkan", 9, 2, 100), _p("kijun", 26, 3, 200), _p("senkou_b", 52, 5, 400)],
+     "outputs": ["tenkan_sen", "kijun_sen", "senkou_a", "senkou_b"]},
 ]
 
 CATALOG_BY_KEY: dict[str, dict] = {e["key"]: e for e in INDICATOR_CATALOG}

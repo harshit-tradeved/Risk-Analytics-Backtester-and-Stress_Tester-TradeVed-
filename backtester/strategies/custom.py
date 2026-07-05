@@ -41,16 +41,18 @@ class CustomStrategy(BaseStrategy):
 
     @classmethod
     def param_schema(cls) -> dict[str, Any]:
-        # Rules are edited by the dedicated RuleBuilder UI, not the generic form,
-        # so they are typed as 'array' (hidden from the simple form renderer).
         return {
-            "entry_rules":          Param("array", "Entry Rules", group="Rules"),
-            "exit_rules":           Param("array", "Exit Rules", group="Rules"),
-            "logic":                Param("select", "Combine With", options=["AND", "OR"], group="Rules"),
-            "invest_per_trade_usd": Param("number", "Invest / Trade (USD)", min=0, step=50, group="Sizing",
+            "entry_rules":          Param("array",  "Entry Rules",          group="Rules"),
+            "exit_rules":           Param("array",  "Exit Rules",           group="Rules"),
+            "logic":                Param("select", "Combine With",         options=["AND", "OR"], group="Rules"),
+            "invest_per_trade_usd": Param("number", "Invest / Trade (USD)", min=0,   step=50,    group="Sizing",
                                           help="Set 0 to use fixed units."),
-            "quantity":             Param("number", "Units / Trade", min=0, step=0.001, group="Sizing",
+            "quantity":             Param("number", "Units / Trade",        min=0,   step=0.001, group="Sizing",
                                           depends_on={"field": "invest_per_trade_usd", "value": 0}),
+            "stop_loss_pct":        Param("number", "Stop Loss %",          min=0,   max=50,  step=0.5, group="Exit",
+                                          help="Exit when price drops this % below entry. 0 = disabled."),
+            "take_profit_pct":      Param("number", "Take Profit %",        min=0,   max=500, step=0.5, group="Exit",
+                                          help="Exit when price rises this % above entry. 0 = disabled."),
         }
 
     @staticmethod
@@ -67,6 +69,8 @@ class CustomStrategy(BaseStrategy):
             "logic": "AND",
             "invest_per_trade_usd": 1000.0,
             "quantity": 0.01,
+            "stop_loss_pct": 0.0,
+            "take_profit_pct": 0.0,
         }
 
     def _validate_params(self, params: dict):
@@ -139,8 +143,65 @@ class CustomStrategy(BaseStrategy):
         return combined
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
-        entry = self._combine(df, self.entry_rules)
-        exit_ = self._combine(df, self.exit_rules or [])
-        return signals_from_masks(df, entry, exit_,
-                                  invest_usd=getattr(self, "invest_per_trade_usd", 0),
-                                  qty_fallback=getattr(self, "quantity", 0.01))
+        entry_mask = self._combine(df, self.entry_rules)
+        exit_mask  = self._combine(df, self.exit_rules or [])
+
+        sl_pct = float(getattr(self, "stop_loss_pct",   0) or 0)
+        tp_pct = float(getattr(self, "take_profit_pct", 0) or 0)
+
+        if not sl_pct and not tp_pct:
+            return signals_from_masks(df, entry_mask, exit_mask,
+                                      invest_usd=getattr(self, "invest_per_trade_usd", 0),
+                                      qty_fallback=getattr(self, "quantity", 0.01))
+
+        # Custom signal loop: rule-based exit OR stop-loss OR take-profit
+        invest_usd   = float(getattr(self, "invest_per_trade_usd", 0) or 0)
+        qty_fallback = float(getattr(self, "quantity", 0.01) or 0.01)
+
+        df_out = df.copy()
+        close  = df_out["close"].astype(float).to_numpy()
+        low    = df_out["low"].astype(float).to_numpy()
+        high   = df_out["high"].astype(float).to_numpy()
+        em     = entry_mask.fillna(False).to_numpy().astype(bool)
+        xm     = exit_mask.fillna(False).to_numpy().astype(bool)
+        n      = len(df_out)
+
+        signals  = ["HOLD"] * n
+        qtys     = [0.0]    * n
+        meta     = [{}]     * n
+        in_pos   = False
+        held_qty = 0.0
+        entry_px = 0.0
+
+        for i in range(n):
+            price = close[i]
+            if not in_pos:
+                if em[i]:
+                    qty = (invest_usd / price) if (invest_usd > 0 and price > 0) else qty_fallback
+                    if qty > 0:
+                        signals[i]  = "BUY"
+                        qtys[i]     = qty
+                        meta[i]     = {"entry": True}
+                        in_pos, held_qty, entry_px = True, qty, price
+            else:
+                # Check SL on bar low (can be hit intrabar), TP on bar high
+                sl_hit = sl_pct > 0 and low[i]  <= entry_px * (1 - sl_pct / 100)
+                tp_hit = tp_pct > 0 and high[i] >= entry_px * (1 + tp_pct / 100)
+                rule_exit = xm[i]
+
+                if sl_hit or tp_hit or rule_exit:
+                    exit_price = (entry_px * (1 - sl_pct / 100) if sl_hit else
+                                  entry_px * (1 + tp_pct / 100) if tp_hit else price)
+                    signals[i] = "SELL"
+                    qtys[i]    = held_qty
+                    meta[i]    = {
+                        "exit": True,
+                        "exit_reason": "stop_loss" if sl_hit else "take_profit" if tp_hit else "rule",
+                        "pnl_pct": round((exit_price - entry_px) / entry_px * 100, 2) if entry_px else 0.0,
+                    }
+                    in_pos, held_qty, entry_px = False, 0.0, 0.0
+
+        df_out["signal"]   = signals
+        df_out["quantity"] = qtys
+        df_out["meta"]     = meta
+        return df_out

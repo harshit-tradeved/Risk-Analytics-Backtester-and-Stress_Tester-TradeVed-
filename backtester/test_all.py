@@ -738,13 +738,41 @@ run_test("Indicator engine reference values (RSI/ATR/MACD/Bollinger)", test_indi
 def test_indicator_catalog_compute_all():
     from engine.indicators import INDICATOR_CATALOG, compute
     df = _synthetic_ohlcv()
+    # orb (Opening Range Breakout) is structurally intraday-only: on 1-candle-per-day
+    # data every row is day_idx=0 (still "inside" the opening range), so it's
+    # correctly all-NaN here — verified separately below with intraday data.
     for e in INDICATOR_CATALOG:
         out = compute(df, e["key"])
         assert list(out.columns) == e["outputs"], (e["key"], list(out.columns))
+        if e["key"] == "orb":
+            continue
         assert not out.dropna().empty, f"{e['key']} all-NaN"
     print(f"  all {len(INDICATOR_CATALOG)} indicators compute; columns match catalog")
 
 run_test("Indicator catalog: every indicator computes with declared outputs", test_indicator_catalog_compute_all)
+
+
+def test_orb_intraday():
+    from engine.indicators import compute
+    import numpy as np
+    n = 240
+    rng = np.random.default_rng(3)
+    close = pd.Series(100 + np.cumsum(rng.standard_normal(n)) * 0.3)
+    df = pd.DataFrame({
+        "timestamp": pd.date_range("2023-01-01", periods=n, freq="h"),
+        "open": close.shift(1).fillna(close.iloc[0]),
+        "high": close + abs(rng.standard_normal(n)) * 0.4,
+        "low":  close - abs(rng.standard_normal(n)) * 0.4,
+        "close": close,
+        "volume": pd.Series(rng.integers(1000, 9000, n)).astype(float),
+    })
+    out = compute(df, "orb", opening_candles=5)
+    assert not out.dropna().empty, "orb should produce real values on intraday data"
+    # rows within the opening range itself must be NaN (no look-ahead)
+    assert out["orb_high"].iloc[0:5].isna().all(), "orb must be NaN during the opening range window"
+    print("  orb produces real, non-look-ahead values on intraday (hourly) data")
+
+run_test("ORB indicator: intraday-only, non-look-ahead", test_orb_intraday)
 
 
 def test_preset_strategies_emit_valid_signals():
