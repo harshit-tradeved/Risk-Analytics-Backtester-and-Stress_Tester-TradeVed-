@@ -11,9 +11,45 @@
 [![Tailwind](https://img.shields.io/badge/Tailwind_CSS-3-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
 [![Tests](https://img.shields.io/badge/tests-37_unit_%2B_207_stress-brightgreen)](backtester/test_all.py)
 
-*Backtest any strategy. Stress it through 17 historical crises. Forecast it with AI. Even turn an Instagram trading reel into a verified backtest.*
+*Backtest 55+ strategies. Stress them through 17 historical crises. Forecast them with a GPU foundation model. Grade them A+ → F on robustness. Even turn an Instagram trading reel into a verified backtest.*
 
 </div>
+
+---
+
+## 🎬 The Platform in Action
+
+### Backtester — every metric a quant would ask for, at a glance
+
+The moment a run finishes you get 14 headline metrics (Sharpe, Sortino, Calmar, profit factor, best/worst trade…) **plus a per-regime breakdown**: the same strategy scored separately inside the bull, bear and sideways segments of your date range, so you instantly see whether returns came from skill or from one lucky regime.
+
+![Backtest results — metrics grid and performance by market regime](docs/screenshots/backtest-results.png)
+
+Equity curves are painted over **regime-shaded backgrounds** (green = bull, red = bear, amber = sideways), with tabs for drawdown, return distribution, price + trade markers, monthly P&L heatmap and rolling metrics:
+
+![Equity curve with regime shading](docs/screenshots/backtest-charts.png)
+
+### Stress Tester — an A+ → F Robustness Score for any strategy
+
+Pick a crisis (2008 GFC, COVID flash crash, LUNA-style collapse, Yes Bank 2020…), pick a severity, and the engine replays your strategy through 100+ Monte Carlo perturbations of that crisis — **streamed live over Server-Sent Events** so you watch the distribution build in real time. The verdict card grades the strategy across scenario survival, MC stability, tail safety (CVaR / Expected Shortfall, probability of ruin) and overfit resistance:
+
+![Stress test verdict with A+ robustness score and baseline-vs-stressed deltas](docs/screenshots/stress-live.png)
+
+Every simulated path lands on a raw-canvas spaghetti chart (handles 1000+ paths — hover to inspect, click to pin, toggle absolute vs delta-vs-baseline), with P5/P50/P95 percentile cards and a sortable run log:
+
+![100 Monte Carlo equity paths with percentile cards and run log](docs/screenshots/stress-mc-paths.png)
+
+### AI Forward Test — the distribution of plausible futures
+
+Instead of asking *"how did this strategy do last year?"*, the Forward Test asks *"how will it do across 100 synthetic futures?"* — generated either by circular block-bootstrap (autocorrelation-preserving) or by the **Kronos time-series foundation model running on a GPU via Modal**. You get a regime forecast, a survival rate, and full outcome distributions. Two more modes — **Crisis Sim** (stress + generated paths) and **Paper Trade** (bar-by-bar simulation) — live on the same page:
+
+![AI Forward Test — Kronos-generated synthetic paths, regime forecast, survival rate](docs/screenshots/forward-test-results.png)
+
+### Reel Backtest — from influencer hype to hard numbers
+
+Paste the transcript (or URL) of any trading reel. An LLM extracts the claimed strategy into a strict intermediate representation, a validator sanity-checks it, the real engine backtests it, and a plain-language verdict tells a complete novice whether "this prints money every time" actually survived the data:
+
+![Reel Backtest — paste a transcript, get an extracted and backtested strategy](docs/screenshots/reel-backtest.png)
 
 ---
 
@@ -21,48 +57,103 @@
 
 | | |
 |---|---|
-| 🇮🇳 **Real Indian market economics** | Itemised STT, exchange charges, SEBI fees, GST, stamp duty at **Budget 2024 rates** — plus F&O **lot-size enforcement** (NIFTY50 = 50, BANKNIFTY = 15…). Most backtesters fake this with a flat fee. |
-| 💥 **Crisis-grade stress testing** | **17 scenario presets** — GFC 2008, COVID crash, LUNA collapse, pump & dump… plus 4 India-specific ones (Demonetization 2016, Yes Bank collapse, F&O expiry gamma squeeze) — replayed as Monte Carlo simulations **streamed live over SSE** onto a canvas "spaghetti" chart that handles 1000+ paths. |
-| 🤖 **AI strategy extraction from social media** | Paste an Instagram reel / YouTube transcript → an LLM extracts the strategy into a validated intermediate representation (IR) → it runs on the real engine → a **plain-language verdict** tells a novice whether the influencer's strategy actually works. |
-| 🔮 **Kronos AI price forecasting** | Foundation-model time-series forecasting (Kronos) deployed on Modal, with concurrent batched path generation (100 paths ≈ 2 s) compared against classical bootstrap. |
-| 🧱 **No-code strategy builder** | 25 indicators (40 output series) in a pure pandas/numpy engine + a visual rule builder (`cross_above`, `cross_below`, AND/OR logic) — new strategies need **zero frontend changes** thanks to schema-driven forms. |
+| 🇮🇳 **Real Indian market economics** | Itemised STT, exchange charges, SEBI fees, GST, stamp duty at **Budget 2024 rates** — plus F&O **lot-size enforcement** (NIFTY50 = 50, BANKNIFTY = 15…). Most backtesters fake this with a flat fee; this one refuses to place a sub-lot futures order, exactly like a real broker. |
+| 💥 **Crisis-grade stress testing** | **17 scenario presets** — 13 global + 4 India-specific (Demonetization 2016, COVID NIFTY, Yes Bank collapse, F&O expiry gamma squeeze) — with mild/moderate/severe calibration, optional 20–30% outlier injection, trade-level MC (reshuffle + random skip) and regime-aware path fanning. |
+| 🎯 **One-number verdicts** | The **Robustness Score (A+ → F)** compresses scenario survival, MC stability, tail safety (CVaR/ES, probability of ruin) and walk-forward overfit resistance into a single score a non-quant can act on. |
+| 🤖 **AI strategy extraction from social media** | Reel transcript → LLM → validated strategy IR → real backtest → plain-language verdict. Validated at scale across 100+ real reels. |
+| 🔮 **Foundation-model forecasting** | Kronos (GPU, deployed on Modal) generates synthetic futures with concurrent batching — 100 paths in ~2 s — benchmarked against classical block-bootstrap. |
+| 🧱 **55+ strategies, zero-code extensibility** | 3 classic strategies + 52 indicator presets (including 20 two-indicator confirmations like *Supertrend + RSI*, *MACD + ADX*) + a visual rule builder. Strategies self-describe their parameters, so a new one needs **zero frontend changes**. |
 
 ---
 
-## 🖼️ Architecture
+## 🧭 How It Works — Core Workflows
 
-![Architecture](architecture.svg)
+### 1. Backtest pipeline
 
+```mermaid
+flowchart LR
+    A[📡 Data Fetcher<br/>Binance · CoinGecko · yfinance · NSE/BSE] --> B[🧹 Validator<br/>gaps · dupes · quality score]
+    B --> C[🧠 Strategy<br/>55+ presets or custom rules]
+    C --> D[⚙️ Trade Simulator<br/>WACB · partial fills · lot sizes]
+    D --> E[💰 Cost Model<br/>Indian Budget-2024 or flat-fee]
+    E --> F[📊 Metrics<br/>Sharpe · Sortino · Calmar · MDD]
+    F --> G[🌗 Regime Classifier<br/>bull / bear / sideways]
+    G --> H[🖥️ React UI<br/>charts · trade log · HTML report]
+    F -.append-only.-> I[(🗄️ StrategyOutcome DB<br/>future ranker training set)]
 ```
-React 18 + Vite + TS ──► FastAPI (async, SSE) ──► Strategy Engine ──► Trade Simulator (WACB, partial fills, lot sizes)
-        │                       │                      │                     │
-   Canvas MC charts        SQLite (outcomes)      25-indicator         Cost models (Indian
-   Rule builder UI         Kronos @ Modal         pure-pandas engine   Budget-2024 / flat-fee)
+
+Every backtest also quietly appends an outcome row (strategy, params, symbol, regime mix, metrics) to a `StrategyOutcome` table — the seed dataset for a future strategy-recommendation ranker.
+
+### 2. Stress test — live SSE streaming
+
+```mermaid
+sequenceDiagram
+    participant UI as React UI (canvas)
+    participant API as FastAPI /api/stress/stream
+    participant ENG as Stress Engine
+
+    UI->>API: POST scenario + severity + N runs
+    API->>ENG: baseline backtest (clean data)
+    ENG-->>UI: event: baseline
+    loop N Monte Carlo runs
+        API->>ENG: apply_stress(severity × U(0.75,1.25))
+        ENG-->>UI: event: run {metrics, equity path}
+        Note over UI: canvas draws path #i incrementally
+    end
+    API-->>UI: event: complete {percentiles, CVaR, robustness score}
+```
+
+Two details judges usually ask about: **(a)** each run jitters both shock *timing* and *magnitude*, so paths fan out realistically instead of collapsing onto one line; **(b)** crash scenarios use *persistent* drift — prices don't magically snap back after the crash window, which would otherwise gift the strategy free buy-low-sell-high profits.
+
+### 3. Reel → Backtest (AI pipeline)
+
+```mermaid
+flowchart LR
+    A[🎬 Reel URL or transcript] --> B[📝 Ingestion<br/>yt-dlp · caption scrape]
+    B --> C[🤖 LLM Extractor<br/>strategy → strict IR JSON]
+    C --> D{🛡️ IR Validator<br/>schema + sanity checks}
+    D -- invalid --> C
+    D -- "not a strategy" --> X[❌ Honest rejection<br/>motivation / signal-selling reels]
+    D -- valid --> E[⚙️ Real backtest engine]
+    E --> F[🗣️ Plain-language verdict<br/>+ improvement agent suggestions]
+```
+
+The IR editor in the UI lets power users inspect and tweak the extracted rules before running — so the LLM proposes, but the deterministic engine always disposes.
+
+### 4. AI Forward Test
+
+```mermaid
+flowchart LR
+    A[📜 Historical context window] --> B{Path generator}
+    B -->|classical| C[🎲 Circular block-bootstrap<br/>preserves autocorrelation]
+    B -->|AI| D[🔮 Kronos foundation model<br/>GPU on Modal, batched]
+    C --> E[100–500 synthetic futures]
+    D --> E
+    E --> F[⚙️ Strategy simulated on every path]
+    F --> G[📊 Outcome distribution · survival rate · regime forecast]
 ```
 
 ---
 
 ## ✨ Feature Tour
 
-### 1️⃣ Backtester
-- **Strategies:** GRID (price-level laddering), DCA (interval accumulation), PLA (EMA crossover + cascading average-down), 6 indicator presets (RSI, MACD, Bollinger, Supertrend, Donchian, MA-Cross), and fully **custom rule-built strategies**
-- **Markets:** Crypto (Binance / CoinGecko), US stocks (yfinance), Indian NSE/BSE equity, futures & options
-- **Simulator:** Weighted-average cost basis, partial fills when cash is short, lot-size flooring with skip diagnostics
-- **Metrics:** Sharpe, Sortino, Calmar, max drawdown, profit factor, win rate — annualised over 252 trading days
-- **Regime detection:** timeframe-aware bull / bear / sideways labelling, so a 4h and a 1d backtest of the same period agree
-- **Validation:** walk-forward, out-of-sample, Monte Carlo, stress testing
+### Backtester
+- **Strategies:** GRID (price-level laddering), DCA (interval accumulation), PLA (EMA crossover + cascading average-down), **52 indicator presets** — momentum (RSI, Stochastic, CCI, Williams %R, ROC, TSI…), trend (ADX, PSAR, Aroon, SMA/WMA/HMA/Triple-EMA crosses, Golden Cross…), volume (VWAP, OBV, MFI, CMF), volatility (Keltner, ATR breakout, Bollinger squeeze) and 20 two-indicator confirmation combos — plus a fully **custom rule builder** (AND/OR condition trees over the indicator engine)
+- **Markets:** Crypto (Binance/CoinGecko), US stocks (yfinance), Indian NSE/BSE equity delivery & intraday, futures and options with real lot sizes
+- **Simulator:** weighted-average cost basis, partial fills when cash runs short, lot-size flooring with skip diagnostics, slippage modelling
+- **Validation modes:** hold-out and **walk-forward** (rolling in-sample/out-of-sample windows) selectable per run
+- **Regime intelligence:** timeframe-aware bull/bear/sideways classification — the same period labelled consistently whether you test on 4h or 1d candles — driving per-regime metric tables and shaded charts
 
-### 2️⃣ Stress Tester
-- Pure-function scenario engine (`apply_stress`) — deep-copies data, never mutates, **persistent drift** so crashes don't snap back into fake profits
-- Per-run severity jitter (`severity × U(0.75, 1.25)`) so Monte Carlo paths fan out realistically in both timing *and* magnitude
-- **Live SSE streaming**: baseline → run × N → complete, rendered incrementally on a high-DPI canvas with hover, click-to-pin and a delta-vs-baseline mode
+### Stress Tester
+- 17 presets across four families: historical replays (GFC, COVID, flash crashes), structural regimes (slow bleed, whipsaw, liquidity drought), manipulation patterns (pump & dump, gap risk) and India-specific events
+- **Robustness Score** with transparent axis weights: scenario survival 30% · MC stability 25% · tail safety 20% · overfit resistance 25%
+- Tail-risk analytics: CVaR / Expected Shortfall, probability of ruin, P5/P50/P95 outcome cards
+- Optional **trade-level Monte Carlo** (reshuffles executed trades and randomly skips a fraction per run) and **regime-aware MC** for physically plausible path fanning
 
-### 3️⃣ Reel → Backtest (AI pipeline)
-- Transcript ingestion → LLM extraction → **IR validator** (schema + sanity checks) → engine execution → plain-language verdict + improvement suggestions
-- Validated at scale: 100+ real reels processed end-to-end
-
-### 4️⃣ Strategy Intelligence (moat seed)
-- Every backtest appends a `StrategyOutcome` row (strategy, params, symbol, regime mix, outcome metrics) — the training set for a future strategy ranker
+### AI & Forecasting
+- **Kronos** foundation-model price forecasting served from Modal with concurrent batch generation (100 paths ≈ 2 s)
+- **Crisis Sim** (stress scenarios on generated futures) and **Paper Trade** (bar-by-bar forward simulation) modes
+- Reel → Backtest pipeline with confidence scoring, honest rejection of non-testable reels, and an AI improvement agent that suggests parameter fixes for failing strategies
 
 ---
 
@@ -77,6 +168,8 @@ React 18 + Vite + TS ──► FastAPI (async, SSE) ──► Strategy Engine �
 | BNB/USDT | DCA | +73% |
 | ETH/USDT | DCA | +65% |
 
+*Why DCA dominates crypto: crash-then-recover markets reward accumulating through the lows — SOL crashed 95% during FTX and the strategy kept buying.*
+
 **Indian F&O — real lot sizes & Budget-2024 costs, 792 runs**
 
 | Symbol | Best Strategy | Return | Sharpe | Max DD |
@@ -86,7 +179,7 @@ React 18 + Vite + TS ──► FastAPI (async, SSE) ──► Strategy Engine �
 | INFY | PLA EMA 9/21 | +20.4% | **1.62** | −4.6% |
 | RELIANCE | GRID 5-level exp. | +6.1% | 1.56 | −1.5% |
 
-**Stress validation — 207 tests (13 scenarios × 3 strategies × 3 assets × severities)**: LUNA-style collapse is the most dangerous scenario (median −11.8%); DCA/GRID actually *improve* through GFC-style crashes by accumulating the dip.
+**Stress validation — 207 automated tests** (13 scenarios × 3 strategies × 3 assets × severities): LUNA-style collapse is the most dangerous scenario (median −11.8%); DCA and GRID actually *improve* through GFC-style crashes by accumulating the dip — exactly the kind of non-obvious insight the platform exists to surface.
 
 ---
 
@@ -109,7 +202,7 @@ npm install && npm run dev -- --port 5173          # UI on :5173
 
 - **UI:** http://localhost:5173 · **Swagger:** http://localhost:8000/docs
 
-Run the test suite:
+Run the test suites:
 
 ```bash
 cd backtester
@@ -127,20 +220,23 @@ backtester/
 ├── engine/
 │   ├── simulator.py        # WACB trade simulator, partial fills, lot sizes
 │   ├── cost_models.py      # IndianCostModel (Budget 2024) + SimpleCostModel
-│   ├── indicators.py       # 25-indicator pure pandas/numpy engine
+│   ├── indicators.py       # 25-indicator pure pandas/numpy engine (40 output series)
 │   ├── metrics.py          # Sharpe / Sortino / Calmar / MDD / PF
 │   ├── regimes.py          # Timeframe-aware regime detection
-│   └── stress.py           # 17 scenario presets, Monte Carlo aggregation
-├── strategies/             # GRID · DCA · PLA · indicator presets · rule-builder
+│   ├── validation.py       # Hold-out & walk-forward validation
+│   └── stress.py           # 17 scenario presets, MC aggregation, robustness scoring
+├── strategies/             # GRID · DCA · PLA · 52 indicator presets · rule-builder
 ├── data/                   # Binance / CoinGecko / yfinance fetchers, NSE/BSE assets
 ├── reel_extractor.py       # Reel transcript → strategy IR (LLM)
 ├── ir_validator.py         # IR schema & sanity validation
 ├── improvement_agent.py    # AI strategy-improvement suggestions
+├── ingestion.py            # Reel/video ingestion (yt-dlp, captions)
 ├── test_all.py             # 37-test pytest suite
 ├── stress_validation.py    # 207-test stress validation
 └── frontend/               # React 18 + Vite + TS + Tailwind
     └── src/components/     # Canvas MC charts, RuleBuilder, StressPage, ReelPage…
 kronos_service/             # Kronos foundation-model forecasting (Modal deployment)
+docs/screenshots/           # The screenshots used in this README
 ```
 
 Deeper dives: [ARCHITECTURE.md](ARCHITECTURE.md) · [TECHNICAL_DOCUMENTATION.md](TECHNICAL_DOCUMENTATION.md) · [USER_GUIDE.md](USER_GUIDE.md) · [PRD.md](PRD.md) · [ROADMAP.md](ROADMAP.md)
@@ -149,10 +245,11 @@ Deeper dives: [ARCHITECTURE.md](ARCHITECTURE.md) · [TECHNICAL_DOCUMENTATION.md]
 
 ## 🧠 Engineering Highlights (for the technically curious judge)
 
-- **Correctness over convenience:** cost tracking uses a `track=True/False` two-phase call so partial fills never double-count fees; crash scenarios use `persist=True` drift so prices don't snap back and mint fake profits.
-- **Performance:** SSE endpoint offloads every blocking backtest to `asyncio.to_thread`; the MC chart is raw Canvas with incremental drawing and devicePixelRatio scaling — Recharts died at ~100 paths, this handles 1000+.
-- **Extensibility:** strategies self-describe via `parameter_schema()`; the frontend renders forms from `/api/strategies`, so adding a strategy touches **zero** frontend files.
-- **No fragile TA dependencies:** every indicator implemented from scratch in pandas/numpy (SMA-seeded Wilder smoothing matches textbook RSI/ATR/ADX values).
+- **Correctness over convenience:** cost tracking uses a two-phase `track=True/False` protocol so partial fills never double-count fees; crash scenarios use persistent drift so prices don't snap back and mint fake profits; win-rate units are enforced end-to-end (a classic source of "5769%" bugs elsewhere).
+- **Performance where it matters:** the SSE endpoint offloads every blocking backtest to `asyncio.to_thread` so events flush between iterations; the MC chart is raw Canvas with incremental drawing and devicePixelRatio scaling — the previous SVG chart died at ~100 paths, this one handles 1000+; Kronos inference is batched and dispatched concurrently (100 paths ≈ 2 s).
+- **Extensibility by design:** strategies self-describe via `parameter_schema()` and the frontend renders forms from `/api/strategies` — the 52 indicator presets shipped with **zero** frontend changes.
+- **No fragile TA dependencies:** every indicator implemented from scratch in pure pandas/numpy, with SMA-seeded Wilder smoothing that matches textbook RSI/ATR/ADX values (verified in tests).
+- **Tested like a product, not a demo:** 37 unit/integration tests + a 207-combination automated stress-validation matrix that exercises every scenario × strategy × asset × severity.
 
 ---
 

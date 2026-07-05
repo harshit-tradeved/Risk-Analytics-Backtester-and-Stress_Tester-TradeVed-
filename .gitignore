@@ -72,8 +72,8 @@ cookies.txt
 *.xlsx
 *.jsonl
 qa_reports/
-deck_shots/
-screenshots/
+/deck_shots/
+/screenshots/
 
 # One-off report/PPT builder scripts (root only)
 /build_ai_docs.py
@@ -84,3 +84,6 @@ screenshots/
 /build_week5_ppt.py
 /build_week5_report.py
 /build_architecture.py
+
+# Allow README screenshots
+!docs/screenshots/*.png
