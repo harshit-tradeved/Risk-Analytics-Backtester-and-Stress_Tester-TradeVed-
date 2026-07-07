@@ -43,6 +43,11 @@ def test_pipeline_run_roundtrip():
         db.close()
 
 
+def test_run_segment_backtest_alias_exists():
+    from engine.validation import run_segment_backtest, _segment_metrics
+    assert run_segment_backtest is _segment_metrics
+
+
 def test_strategy_outcome_has_source_columns():
     init_db()
     db = SessionLocal()

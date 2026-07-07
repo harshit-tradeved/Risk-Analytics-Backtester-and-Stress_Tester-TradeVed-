@@ -553,3 +553,10 @@ def _empty_walk_forward(window: int, step: int) -> dict:
         "validation_timestamps": [],
         "validation_drawdowns": [],
     }
+
+
+# Public alias — orchestrator/pipeline.py runs single backtests (loop rounds,
+# retry-symbol) through this rather than reaching into the "private" helper
+# directly. Mirrors the existing `run_single_backtest = _single_backtest`
+# alias pattern in engine/stress.py.
+run_segment_backtest = _segment_metrics
