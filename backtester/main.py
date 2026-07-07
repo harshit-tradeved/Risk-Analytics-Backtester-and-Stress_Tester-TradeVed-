@@ -2779,23 +2779,41 @@ async def stream_paper_trade(req: PaperRequest):
 @app.post(f"{API_PREFIX}/pipeline/start", tags=["Pipeline"])
 async def pipeline_start(req: PipelineStartRequest):
     transcript = (req.transcript or "").strip()
+    caption    = (req.caption or "").strip()
     if not transcript and not req.url:
         raise HTTPException(400, "Provide either 'transcript' or 'url'")
     if not transcript and req.url:
         from config import INGESTION_API_URL
         if INGESTION_API_URL:
-            import httpx
-            async with httpx.AsyncClient(timeout=120) as client:
-                resp = await client.post(f"{INGESTION_API_URL.rstrip('/')}/extract", json={"url": req.url})
-                resp.raise_for_status()
-                data = resp.json()
-                transcript = data.get("transcript", "") or data.get("original_source_text", "")
+            # External ingestion service (friend's deployed API)
+            try:
+                import httpx
+                async with httpx.AsyncClient(timeout=120) as client:
+                    resp = await client.post(f"{INGESTION_API_URL.rstrip('/')}/extract", json={"url": req.url})
+                    resp.raise_for_status()
+                    data = resp.json()
+                    transcript = data.get("transcript", "") or data.get("original_source_text", "")
+                    caption    = data.get("caption", caption)
+            except Exception as e:
+                raise HTTPException(502, f"Ingestion service error: {e}")
         else:
-            raise HTTPException(400, "No INGESTION_API_URL configured — provide 'transcript' directly instead")
+            # Local ingestion — yt-dlp + ffmpeg + Groq Whisper (ingestion.py)
+            try:
+                from ingestion import handle_url as _ingest_url
+                data = await asyncio.to_thread(_ingest_url, req.url)
+                transcript = data.get("original_source_text") or data.get("transcript", "")
+                caption    = data.get("caption", caption)
+            except Exception as e:
+                raise HTTPException(502, f"Ingestion failed: {e}")
+
+    if not transcript:
+        raise HTTPException(400,
+            "No spoken audio or on-screen strategy text could be extracted from this "
+            "content (likely a silent or purely visual video). Try pasting the transcript manually instead.")
 
     try:
         run_id = pipeline_orchestrator.start_run(
-            user_id=req.user_id, transcript=transcript, caption=req.caption or "",
+            user_id=req.user_id, transcript=transcript, caption=caption,
             symbol=req.symbol, source=req.source, interval=req.interval,
             start_date=req.start_date, end_date=req.end_date, capital=req.capital, tweak=req.tweak,
         )
