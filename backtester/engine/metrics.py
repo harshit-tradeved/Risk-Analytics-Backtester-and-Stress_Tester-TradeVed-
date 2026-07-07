@@ -249,3 +249,51 @@ def _empty_metrics(initial_capital: float) -> dict:
         "drawdowns": [0.0],
         "timestamps": [],          "trades": [],
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Absolute composite score for the pipeline optimization loop
+# ─────────────────────────────────────────────────────────────────────────────
+# `_add_composite_scores` in crypto_optimizer.py min-max normalises across a
+# BATCH of candidate runs — it needs several rows to compare. The pipeline
+# loop only ever has ONE candidate per round, so there's nothing to normalise
+# against; instead each metric is clamped against a fixed, reasonable range
+# and rescaled to [0, 1]. Same weights as the batch optimizer (Sharpe 35% +
+# Return 25% + Sortino 20% + Calmar 10% + MDD 10%), same intent, different
+# math because the input shape is different (one row, not many).
+SCORE_WEIGHTS = {
+    "sharpe_ratio":     0.35,
+    "total_return_pct": 0.25,
+    "sortino_ratio":    0.20,
+    "calmar_ratio":     0.10,
+    "max_drawdown_pct": 0.10,
+}
+
+_SCORE_RANGES = {
+    "sharpe_ratio":     (-3.0, 3.0),
+    "total_return_pct": (-50.0, 100.0),
+    "sortino_ratio":    (-3.0, 3.0),
+    "calmar_ratio":     (-3.0, 3.0),
+    "max_drawdown_pct": (0.0, 50.0),   # inverted: lower drawdown = higher score
+}
+
+
+def score_backtest(metrics: dict) -> float:
+    """
+    Absolute composite score in [0, 1] for a single backtest's metrics dict.
+    Missing fields clamp to their range midpoint (score contribution 0.5)
+    rather than 0, so an incomplete metrics dict doesn't look catastrophic.
+    """
+    total = 0.0
+    for key, weight in SCORE_WEIGHTS.items():
+        lo, hi = _SCORE_RANGES[key]
+        val = metrics.get(key)
+        if val is None:
+            total += weight * 0.5
+            continue
+        val = max(lo, min(hi, float(val)))
+        norm = (val - lo) / (hi - lo)
+        if key == "max_drawdown_pct":
+            norm = 1.0 - norm
+        total += weight * norm
+    return round(total, 4)

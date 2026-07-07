@@ -195,6 +195,9 @@ class StrategyOutcome(Base):
     end_date    = Column(Date)
     capital     = Column(Float)
     params      = Column(Text)                        # JSON-encoded strategy params
+    source_url      = Column(String(500))              # original reel/transcript URL, if any
+    source_platform = Column(String(20))                # instagram | youtube | tiktok | manual
+    source_creator  = Column(String(120))                # creator handle/name, for recommendation surface
     # ── Outcome metrics ──
     total_return_pct = Column(Float)
     sharpe_ratio     = Column(Float)
@@ -225,3 +228,46 @@ class Feedback(Base):
     page       = Column(String(50))
     context    = Column(Text)                          # JSON: symbol, strategy, backtest_id, etc.
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PipelineRun(Base):
+    """Persisted state for one run of the unified extract→loop→holdout→report pipeline.
+
+    Every stage transition writes to this row — that's what makes a run
+    resumable across a backend restart and enforces "holdout touched once"
+    (holdout only ever runs if holdout_result_json is still null).
+    """
+    __tablename__ = "pipeline_runs"
+    __table_args__ = (
+        Index("ix_pipeline_user", "user_id"),
+        Index("ix_pipeline_status", "status"),
+        Index("ix_pipeline_cache_key", "cache_key"),
+    )
+
+    id          = Column(String(36), primary_key=True)
+    user_id     = Column(String(200), nullable=False)
+    status      = Column(String(20), nullable=False, default="running")
+    # running | awaiting_checkpoint | looping | holdout | paper_trading | complete | failed | interrupted
+    stage       = Column(String(30), nullable=False, default="extracting")
+
+    ir_json     = Column(Text)
+    symbol      = Column(String(20))
+    timeframe   = Column(String(10))
+    source_url      = Column(String(500))
+    source_platform = Column(String(20))
+    source_creator  = Column(String(120))
+    cache_key   = Column(String(64))
+
+    loop_round             = Column(Integer, default=0)
+    composite_scores_json  = Column(Text)     # list[{round, score, metrics}]
+
+    checkpoint_opened_at    = Column(DateTime)
+    checkpoint_timeout_secs = Column(Integer)   # random 60-100, fixed once at checkpoint-open
+
+    holdout_result_json = Column(Text)
+    report_json          = Column(Text)
+    paper_trading_task_id = Column(String(36))
+    error_message         = Column(Text)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
