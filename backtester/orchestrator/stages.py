@@ -1,0 +1,136 @@
+"""
+Pure stage functions for the unified pipeline. Each function does ONE piece
+of work and returns a plain dict/DataFrame — no DB reads or writes here.
+`orchestrator/pipeline.py` is the only place that touches the PipelineRun
+row; that keeps these functions independently testable and reusable (the
+same run_loop_round, for instance, is used both by the normal loop and by
+the retry-symbol re-entry path).
+"""
+from __future__ import annotations
+
+import json
+import logging
+from datetime import date, datetime
+from typing import Any, Optional
+
+import pandas as pd
+
+from data.fetcher import DataFetcher
+from data.validator import DataValidator
+from engine.metrics import score_backtest
+from engine.validation import run_segment_backtest, run_holdout, run_walk_forward
+from ir_validator import validate_ir, normalize_ir
+from strategies import STRATEGY_REGISTRY
+
+logger = logging.getLogger(__name__)
+
+_fetcher = DataFetcher()
+_validator = DataValidator()
+
+
+def fetch_and_validate_data(
+    symbol: str, source: str, interval: str, start_date: date, end_date: date,
+) -> pd.DataFrame:
+    start_dt = datetime.combine(start_date, datetime.min.time())
+    end_dt = datetime.combine(end_date, datetime.max.time())
+    df = _fetcher.fetch(symbol, start_dt, end_dt, source, interval)
+    result = _validator.validate(df, interval=interval)
+    if not result.passed:
+        raise ValueError(f"Data quality too low ({result.quality_score:.0f}/100): {result.issues}")
+    return df
+
+
+def extract_ir(transcript: str, caption: str, tweak: Optional[str] = None) -> dict[str, Any]:
+    """Extract a Strategy IR from a transcript. If a tweak was submitted
+    alongside the original input, fold it into the transcript context so
+    extraction accounts for it from the start (cheaper than extract-then-patch
+    when the tweak is already available)."""
+    from reel_extractor import extract_strategy_ir
+    effective_transcript = transcript
+    if tweak:
+        effective_transcript = f"{transcript}\n\n[User's additional instruction: {tweak}]"
+    return extract_strategy_ir(effective_transcript, caption)
+
+
+def validate_and_normalize(ir: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    normalized = normalize_ir(ir)
+    errors = validate_ir(normalized)
+    return normalized, errors
+
+
+def patch_ir_with_tweak(ir: dict[str, Any], tweak: str, symbol: str, interval: str) -> dict[str, Any]:
+    """
+    User typed a tweak during the checkpoint window. Reuses the same
+    mechanic as improvement_agent.critique_and_improve() — a single LLM
+    call that edits the existing IR — except triggered by user text
+    instead of an automated metrics critique, and with no metrics yet
+    (there's been no backtest run at checkpoint time).
+    """
+    from improvement_agent import _llm, _parse_json  # same LLM plumbing critique_and_improve uses
+
+    system = """You are a trading strategy IR editor. The user has an extracted
+Strategy IR and wants a specific change applied. Modify ONLY what their
+instruction asks for — keep everything else unchanged. Reply with ONLY the
+corrected JSON IR object (no markdown, no wrapper):
+{"strategy": "<NAME>", "params": {...}}"""
+    user = json.dumps({"current_ir": ir, "user_instruction": tweak, "symbol": symbol, "interval": interval})
+    try:
+        raw = _llm(system, user, max_tokens=900)
+        patched = _parse_json(raw)
+        return patched if isinstance(patched, dict) and patched.get("strategy") else ir
+    except Exception as e:
+        logger.error("patch_ir_with_tweak failed: %s", e)
+        return ir
+
+
+def run_loop_round(
+    df: pd.DataFrame, ir: dict[str, Any], capital: float, sim_kwargs: dict, symbol: str, interval: str,
+) -> dict[str, Any]:
+    """Run one backtest for the current IR and score it. Does not decide
+    whether to keep looping — that's the caller's job (it needs the
+    previous round's score to compare against)."""
+    strategy_name = ir["strategy"].upper()
+    strategy_cls = STRATEGY_REGISTRY[strategy_name]
+    metrics = run_segment_backtest(df, strategy_cls, ir.get("params", {}), sim_kwargs, capital)
+    if metrics is None:
+        metrics = {"num_trades": 0, "sharpe_ratio": 0.0, "total_return_pct": 0.0,
+                   "sortino_ratio": 0.0, "calmar_ratio": 0.0, "max_drawdown_pct": 0.0}
+    score = score_backtest(metrics)
+    return {"metrics": metrics, "score": score}
+
+
+def run_holdout_check(df: pd.DataFrame, ir: dict[str, Any], capital: float, sim_kwargs: dict) -> dict[str, Any]:
+    strategy_name = ir["strategy"].upper()
+    return run_holdout(df, strategy_name, ir.get("params", {}), sim_kwargs, capital)
+
+
+CHIP_DEFS = [
+    {"id": "stress_detail",   "label": "Stress test detail (17 scenarios)", "kind": "instant"},
+    {"id": "walk_forward",    "label": "Walk-forward fold breakdown",       "kind": "instant"},
+    {"id": "composite_math",  "label": "Composite score math",              "kind": "instant"},
+    {"id": "paper_trading",   "label": "Paper trading",                    "kind": "live"},
+    {"id": "retry_symbol",    "label": "Try this on another symbol",        "kind": "instant"},
+]
+
+
+def build_report(run: dict[str, Any]) -> dict[str, Any]:
+    """
+    Builds the concise, verdict-first report plus chip metadata. `run` is
+    expected to look like a PipelineRun row (dict of its columns) — callers
+    in pipeline.py pass the actual ORM row's __dict__-equivalent fields.
+    """
+    scores = json.loads(run.get("composite_scores_json") or "[]")
+    holdout = json.loads(run.get("holdout_result_json") or "null")
+    last_score = scores[-1]["score"] if scores else None
+    verdict = "No rounds completed yet."
+    if holdout:
+        v = holdout.get("verdict", "unknown")
+        verdict = {
+            "stable":   f"Held up out-of-sample on {run.get('symbol', 'this symbol')} — in-sample and holdout results are consistent.",
+            "degraded": f"Passed in-sample but weakened out-of-sample on {run.get('symbol', 'this symbol')} — treat with caution.",
+            "failed":   f"Passed in-sample but failed the out-of-sample check on {run.get('symbol', 'this symbol')} — likely overfit.",
+        }.get(v, "Holdout check produced an unclear result.")
+    elif last_score is not None:
+        verdict = f"Optimization finished at composite score {last_score:.2f}; holdout check pending."
+
+    return {"verdict": verdict, "last_score": last_score, "chips": CHIP_DEFS}
