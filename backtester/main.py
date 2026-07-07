@@ -16,7 +16,7 @@ import os
 import random
 import uuid
 from copy import deepcopy
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
@@ -59,6 +59,7 @@ from engine.stress import (
 from engine.regimes import classify_regimes
 from frontend.report import generate_report
 from strategies import STRATEGY_REGISTRY
+from orchestrator import pipeline as pipeline_orchestrator
 
 logger = logging.getLogger(__name__)
 
@@ -197,8 +198,9 @@ def _ensure_grid_bounds(strategy_params: dict, df: pd.DataFrame) -> None:
 
 # ── Startup ────────────────────────────────────────────────────────────────────
 @app.on_event("startup")
-def on_startup():
+async def on_startup():
     init_db()
+    asyncio.create_task(pipeline_orchestrator.sweep_loop())
     logger.info("🚀 TradeVed Backtester API started")
 
 
@@ -1227,6 +1229,29 @@ class ReelAnalyzeRequest(BaseModel):
     url:        Optional[str] = Field(None, description="Instagram/YouTube/TikTok reel URL")
     transcript: Optional[str] = Field(None, description="Pre-extracted transcript (skips ingestion)")
     caption:    Optional[str] = Field(None, description="Post caption / description text")
+
+
+class PipelineStartRequest(BaseModel):
+    user_id:    str = Field(..., description="Analytics identity email, or session_id fallback")
+    url:        Optional[str] = None
+    transcript: Optional[str] = None
+    caption:    Optional[str] = None
+    tweak:      Optional[str] = Field(None, description="Optional free-text modification submitted alongside the input")
+    symbol:     str = Field("BTC/USDT")
+    source:     str = Field("binance")
+    interval:   str = Field("1d")
+    start_date: date = Field(default_factory=lambda: date.today() - timedelta(days=730))
+    end_date:   date = Field(default_factory=date.today)
+    capital:    float = Field(10_000.0)
+
+
+class PipelineCheckpointRequest(BaseModel):
+    action: str = Field(..., description="'confirm' or 'tweak'")
+    tweak_text: Optional[str] = None
+
+
+class PipelineRetrySymbolRequest(BaseModel):
+    symbol: str
 
 
 @app.post(f"{API_PREFIX}/strategy/from-ir", tags=["Reel"])
@@ -2745,6 +2770,85 @@ async def stream_paper_trade(req: PaperRequest):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ── Unified Pipeline
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.post(f"{API_PREFIX}/pipeline/start", tags=["Pipeline"])
+async def pipeline_start(req: PipelineStartRequest):
+    transcript = (req.transcript or "").strip()
+    if not transcript and not req.url:
+        raise HTTPException(400, "Provide either 'transcript' or 'url'")
+    if not transcript and req.url:
+        from config import INGESTION_API_URL
+        if INGESTION_API_URL:
+            import httpx
+            async with httpx.AsyncClient(timeout=120) as client:
+                resp = await client.post(f"{INGESTION_API_URL.rstrip('/')}/extract", json={"url": req.url})
+                resp.raise_for_status()
+                data = resp.json()
+                transcript = data.get("transcript", "") or data.get("original_source_text", "")
+        else:
+            raise HTTPException(400, "No INGESTION_API_URL configured — provide 'transcript' directly instead")
+
+    try:
+        run_id = pipeline_orchestrator.start_run(
+            user_id=req.user_id, transcript=transcript, caption=req.caption or "",
+            symbol=req.symbol, source=req.source, interval=req.interval,
+            start_date=req.start_date, end_date=req.end_date, capital=req.capital, tweak=req.tweak,
+        )
+    except pipeline_orchestrator.ActiveRunExistsError as e:
+        raise HTTPException(409, f"You already have an active pipeline run: {e.run_id}")
+    return {"run_id": run_id}
+
+
+@app.get(f"{API_PREFIX}/pipeline/{{run_id}}", tags=["Pipeline"])
+def pipeline_get(run_id: str, db: Session = Depends(get_db)):
+    row = db.query(models.PipelineRun).filter_by(id=run_id).first()
+    if row is None:
+        raise HTTPException(404, "Run not found")
+    return {
+        "id": row.id, "status": row.status, "stage": row.stage,
+        "loop_round": row.loop_round, "symbol": row.symbol,
+        "composite_scores": json.loads(row.composite_scores_json) if row.composite_scores_json else [],
+        "holdout_result": json.loads(row.holdout_result_json) if row.holdout_result_json else None,
+        "report": json.loads(row.report_json) if row.report_json else None,
+        "error_message": row.error_message,
+        "ir": json.loads(row.ir_json) if row.ir_json else None,
+    }
+
+
+@app.post(f"{API_PREFIX}/pipeline/{{run_id}}/checkpoint", tags=["Pipeline"])
+def pipeline_checkpoint(run_id: str, req: PipelineCheckpointRequest, db: Session = Depends(get_db)):
+    row = db.query(models.PipelineRun).filter_by(id=run_id).first()
+    if row is None:
+        raise HTTPException(404, "Run not found")
+    if row.status != "awaiting_checkpoint":
+        raise HTTPException(400, f"Run is not awaiting a checkpoint (status={row.status})")
+    pipeline_orchestrator.submit_checkpoint_response(run_id, req.action, req.tweak_text)
+    return {"ok": True}
+
+
+@app.post(f"{API_PREFIX}/pipeline/{{run_id}}/retry-symbol", tags=["Pipeline"])
+def pipeline_retry_symbol(run_id: str, req: PipelineRetrySymbolRequest):
+    try:
+        new_run_id = pipeline_orchestrator.retry_with_new_symbol(run_id, req.symbol)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"run_id": new_run_id}
+
+
+@app.post(f"{API_PREFIX}/pipeline/{{run_id}}/resume", tags=["Pipeline"])
+def pipeline_resume(run_id: str, db: Session = Depends(get_db)):
+    row = db.query(models.PipelineRun).filter_by(id=run_id).first()
+    if row is None:
+        raise HTTPException(404, "Run not found")
+    if row.status != "interrupted":
+        raise HTTPException(400, f"Run is not interrupted (status={row.status})")
+    pipeline_orchestrator.resume_run(run_id)
+    return {"ok": True}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
