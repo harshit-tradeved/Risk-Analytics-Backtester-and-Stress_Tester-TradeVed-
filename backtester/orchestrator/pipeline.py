@@ -36,6 +36,13 @@ LOOKBACK_DAYS = 730
 DEFAULT_CAPITAL = 10_000.0
 
 _ACTIVE_STATUSES = ("running", "awaiting_checkpoint", "looping", "holdout")
+# "awaiting_checkpoint" is deliberately excluded here: a run resting at a
+# checkpoint has NO live task by design (the task that opened the checkpoint
+# already returned; it's woken back up by submit_checkpoint_response or by
+# the timeout branch of sweep_once itself). Treating "no live task" as
+# "orphaned" for that status would falsely mark every run interrupted the
+# moment it reaches a checkpoint.
+_TASK_REQUIRED_STATUSES = ("running", "looping", "holdout")
 
 # run_id -> asyncio.Task, so the sweep can tell "genuinely still running" from
 # "row says running but the process restarted and the task is gone."
@@ -107,8 +114,13 @@ async def _run_pipeline(
         # ── Extract ──
         extraction = await asyncio.to_thread(extract_ir, transcript, caption, tweak)
         ir = extraction.get("strategy_ir")
-        if not ir:
-            _save(db, row, status="failed", stage="extracting", error_message=extraction.get("error", "extraction failed"))
+        if not isinstance(ir, dict):
+            gaps = extraction.get("gaps") or []
+            message = extraction.get("error") or (
+                f"Could not extract a runnable strategy from this input. "
+                f"{'Missing details: ' + '; '.join(gaps) if gaps else 'The described logic could not be mapped to a supported indicator/rule.'}"
+            )
+            _save(db, row, status="failed", stage="extracting", error_message=message)
             return
 
         # ── Cache lookup ──
@@ -321,7 +333,7 @@ def sweep_once() -> None:
 
         orphaned = (
             db.query(models.PipelineRun)
-            .filter(models.PipelineRun.status.in_(_ACTIVE_STATUSES))
+            .filter(models.PipelineRun.status.in_(_TASK_REQUIRED_STATUSES))
             .all()
         )
         for row in orphaned:
@@ -350,7 +362,11 @@ def resume_run(run_id: str) -> None:
         if row is None:
             raise ValueError("Run not found")
         if row.stage == "checkpoint":
-            _save(db, row, status="awaiting_checkpoint")
+            # No task to launch here by design — re-arm the timeout so the
+            # sweep's timeout branch (or a user response) can wake it later.
+            _save(db, row, status="awaiting_checkpoint",
+                  checkpoint_opened_at=datetime.utcnow(),
+                  checkpoint_timeout_secs=random.randint(*CHECKPOINT_TIMEOUT_RANGE))
             return
         _save(db, row, status="looping")
     finally:

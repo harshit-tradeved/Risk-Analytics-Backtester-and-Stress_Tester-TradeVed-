@@ -8,14 +8,15 @@ import ValidationPanel  from './components/ValidationPanel';
 import StressPage       from './components/StressPage';
 import ForwardTestPage  from './components/ForwardTestPage';
 import ReelPage         from './components/ReelPage';
+import PipelinePage     from './components/PipelinePage';
 import IdentityGate     from './components/IdentityGate';
 import FeedbackWidget   from './components/FeedbackWidget';
 import AdminDashboard   from './components/AdminDashboard';
 import { FormState, BacktestResponse } from './types';
 import { runBacktest, isIndianSource, validateAdminToken } from './api';
-import { getIdentity, getAdminToken, setAdminToken, track, trackPageView } from './analytics';
+import { getIdentity, getSessionId, getAdminToken, setAdminToken, track, trackPageView } from './analytics';
 
-type Page = 'backtest' | 'stress' | 'forward' | 'admin' | 'reel';
+type Page = 'backtest' | 'stress' | 'forward' | 'admin' | 'reel' | 'pipeline';
 
 const today = new Date();
 const fmt   = (d: Date) => d.toISOString().split('T')[0];
@@ -171,6 +172,7 @@ export default function App() {
             { key: 'stress',   label: '🧪 Stress Test'  },
             { key: 'forward',  label: '🔭 Forward Test' },
             { key: 'reel',     label: '🎬 Reel Backtest' },
+            { key: 'pipeline', label: '🔁 Full Pipeline' },
             ...(adminToken ? [{ key: 'admin', label: '🔒 Admin' }] : []),
           ] as { key: Page; label: string }[]).map(p => (
             <button key={p.key} onClick={() => { setPage(p.key); track('switch_page', { to: p.key }, 'action', page); }}
@@ -209,6 +211,10 @@ export default function App() {
       ) : page === 'reel' ? (
         <div className="flex-1 overflow-hidden">
           <ReelPage />
+        </div>
+      ) : page === 'pipeline' ? (
+        <div className="flex-1 overflow-y-auto">
+          <PipelinePage userId={getIdentity().email || getSessionId()} />
         </div>
       ) : (
       <div className="flex flex-1 overflow-hidden">

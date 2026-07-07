@@ -2821,7 +2821,7 @@ def pipeline_get(run_id: str, db: Session = Depends(get_db)):
 
 
 @app.post(f"{API_PREFIX}/pipeline/{{run_id}}/checkpoint", tags=["Pipeline"])
-def pipeline_checkpoint(run_id: str, req: PipelineCheckpointRequest, db: Session = Depends(get_db)):
+async def pipeline_checkpoint(run_id: str, req: PipelineCheckpointRequest, db: Session = Depends(get_db)):
     row = db.query(models.PipelineRun).filter_by(id=run_id).first()
     if row is None:
         raise HTTPException(404, "Run not found")
@@ -2832,7 +2832,7 @@ def pipeline_checkpoint(run_id: str, req: PipelineCheckpointRequest, db: Session
 
 
 @app.post(f"{API_PREFIX}/pipeline/{{run_id}}/retry-symbol", tags=["Pipeline"])
-def pipeline_retry_symbol(run_id: str, req: PipelineRetrySymbolRequest):
+async def pipeline_retry_symbol(run_id: str, req: PipelineRetrySymbolRequest):
     try:
         new_run_id = pipeline_orchestrator.retry_with_new_symbol(run_id, req.symbol)
     except ValueError as e:
@@ -2841,7 +2841,7 @@ def pipeline_retry_symbol(run_id: str, req: PipelineRetrySymbolRequest):
 
 
 @app.post(f"{API_PREFIX}/pipeline/{{run_id}}/resume", tags=["Pipeline"])
-def pipeline_resume(run_id: str, db: Session = Depends(get_db)):
+async def pipeline_resume(run_id: str, db: Session = Depends(get_db)):
     row = db.query(models.PipelineRun).filter_by(id=run_id).first()
     if row is None:
         raise HTTPException(404, "Run not found")

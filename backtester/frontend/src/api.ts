@@ -775,3 +775,43 @@ export async function improveReelStrategy(
   }
   return res.json();
 }
+
+export async function startPipeline(body: {
+  user_id: string; transcript?: string; url?: string; caption?: string; tweak?: string;
+  symbol?: string; source?: string; interval?: string; capital?: number;
+}): Promise<{ run_id: string }> {
+  const resp = await fetch(`${API_BASE}/api/pipeline/start`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  if (!resp.ok) throw new Error((await resp.json()).detail || "Failed to start pipeline");
+  return resp.json();
+}
+
+export async function getPipelineRun(runId: string): Promise<import("./types").PipelineRunState> {
+  const resp = await fetch(`${API_BASE}/api/pipeline/${runId}`);
+  if (!resp.ok) throw new Error("Failed to fetch pipeline run");
+  return resp.json();
+}
+
+export async function submitPipelineCheckpoint(
+  runId: string, action: "confirm" | "tweak", tweakText?: string,
+): Promise<void> {
+  const resp = await fetch(`${API_BASE}/api/pipeline/${runId}/checkpoint`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, tweak_text: tweakText }),
+  });
+  if (!resp.ok) throw new Error("Failed to submit checkpoint response");
+}
+
+export async function retryPipelineSymbol(runId: string, symbol: string): Promise<{ run_id: string }> {
+  const resp = await fetch(`${API_BASE}/api/pipeline/${runId}/retry-symbol`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbol }),
+  });
+  if (!resp.ok) throw new Error("Failed to retry with new symbol");
+  return resp.json();
+}
+
+export async function resumePipelineRun(runId: string): Promise<void> {
+  const resp = await fetch(`${API_BASE}/api/pipeline/${runId}/resume`, { method: "POST" });
+  if (!resp.ok) throw new Error("Failed to resume run");
+}

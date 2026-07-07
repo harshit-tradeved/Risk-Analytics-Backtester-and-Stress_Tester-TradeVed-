@@ -687,3 +687,33 @@ export interface AdminFeedback {
   context:    Record<string, unknown> | null;
   created_at: string;
 }
+
+export type PipelineStatus =
+  | "running" | "awaiting_checkpoint" | "looping" | "holdout"
+  | "paper_trading" | "complete" | "failed" | "interrupted";
+
+export interface PipelineChip {
+  id: string;
+  label: string;
+  kind: "instant" | "live";
+}
+
+export interface PipelineReport {
+  verdict: string;
+  last_score: number | null;
+  chips: PipelineChip[];
+  paper_trading_result?: Record<string, unknown>;
+}
+
+export interface PipelineRunState {
+  id: string;
+  status: PipelineStatus;
+  stage: string;
+  loop_round: number | null;
+  symbol: string;
+  composite_scores: Array<{ round: number; score: number; metrics: Record<string, unknown> }>;
+  holdout_result: { verdict: string; in_sample: unknown; out_of_sample: unknown } | null;
+  report: PipelineReport | null;
+  error_message: string | null;
+  ir: { strategy: string; params: Record<string, unknown> } | null;
+}
