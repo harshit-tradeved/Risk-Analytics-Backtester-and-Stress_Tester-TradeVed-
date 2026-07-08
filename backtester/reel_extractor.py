@@ -17,6 +17,8 @@ import logging
 import re
 from typing import Any
 
+from strategies import STRATEGY_REGISTRY
+
 logger = logging.getLogger(__name__)
 
 
@@ -38,7 +40,73 @@ def _sanitize_llm_text(text: str, max_chars: int = 12_000) -> str:
     return cleaned
 
 
-def _llm(system: str, user: str, max_tokens: int = 1200) -> str:
+# Guardrails the top-level shape of extract_strategy_ir's normalize step at
+# the API level (structured-output / JSON-schema enforcement) rather than
+# relying on prompt instructions the model can ignore. Tonight's live testing
+# found the model inventing its own top-level keys (name/version/direction/
+# market instead of the required {strategy, params} shape) even after the
+# prompt was hardened and an LLM repair retry was added — both are "ask
+# nicely" mechanisms the model can still deviate from. A strict schema means
+# the API itself rejects any response that doesn't have exactly "strategy"
+# (string) and "params" (object) at the top level of strategy_ir; "params"
+# "params" is a JSON-ENCODED STRING in this schema, not a nested object.
+# Azure/OpenAI strict structured-output mode requires additionalProperties:
+# false on every nested object with no exceptions for "I want this one to
+# stay open" — tried {"type":"object","additionalProperties":true} first and
+# the API rejected the schema outright (400: "additionalProperties is
+# required to be supplied and to be false"). params genuinely needs to vary
+# per strategy (DCA/GRID/PLA/CUSTOM/indicator-presets all have different
+# fields) so enumerating every field for every strategy as a giant strict
+# union isn't a maintainable option. Encoding it as a string sidesteps the
+# conflict entirely: the OUTER envelope (exactly {strategy, params} and
+# nothing else) is fully strict-enforced — that's the actual bug this exists
+# to prevent — while params keeps its natural flexibility. Decoded back into
+# a dict in _normalize_to_ir/_normalize_to_ir_with_retry after parsing.
+NORMALIZE_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "strategy_ir": {
+            "anyOf": [
+                {"type": "null"},
+                {
+                    "type": "object",
+                    "properties": {
+                        "strategy": {"type": "string", "enum": sorted(STRATEGY_REGISTRY.keys())},
+                        "params": {"type": "string", "description": "JSON-encoded object, e.g. '{\"entry_rules\": [], ...}'"},
+                    },
+                    "required": ["strategy", "params"],
+                    "additionalProperties": False,
+                },
+            ],
+        },
+        "gaps": {"type": "array", "items": {"type": "string"}},
+        "confidence": {"type": "number"},
+        "suggested_symbol":   {"anyOf": [{"type": "string"}, {"type": "null"}]},
+        "suggested_source":   {"anyOf": [{"type": "string"}, {"type": "null"}]},
+        "suggested_interval": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+    },
+    "required": [
+        "strategy_ir", "gaps", "confidence",
+        "suggested_symbol", "suggested_source", "suggested_interval",
+    ],
+    "additionalProperties": False,
+}
+
+
+def _decode_params_string(result: dict[str, Any]) -> dict[str, Any]:
+    """The schema forces strategy_ir.params to arrive as a JSON string
+    (see NORMALIZE_RESPONSE_SCHEMA's comment) — decode it back to a dict
+    for every downstream caller that expects the normal IR shape."""
+    ir = result.get("strategy_ir")
+    if isinstance(ir, dict) and isinstance(ir.get("params"), str):
+        try:
+            ir["params"] = json.loads(ir["params"])
+        except (TypeError, ValueError):
+            ir["params"] = {}
+    return result
+
+
+def _llm(system: str, user: str, max_tokens: int = 1200, response_schema: dict | None = None) -> str:
     """
     Call the configured LLM provider with retry-with-backoff on rate limits /
     transient failures. Found via reel_pipeline_test_results_large.xlsx (95-URL
@@ -57,7 +125,7 @@ def _llm(system: str, user: str, max_tokens: int = 1200) -> str:
     max_attempts = 5
     for attempt in range(max_attempts):
         try:
-            return _llm_once(system, user, max_tokens)
+            return _llm_once(system, user, max_tokens, response_schema)
         except Exception as e:
             last_exc = e
             msg = str(e).lower()
@@ -76,7 +144,7 @@ def _llm(system: str, user: str, max_tokens: int = 1200) -> str:
     raise last_exc  # unreachable, satisfies type checkers
 
 
-def _llm_once(system: str, user: str, max_tokens: int = 1200) -> str:
+def _llm_once(system: str, user: str, max_tokens: int = 1200, response_schema: dict | None = None) -> str:
     """Single attempt at calling the configured LLM provider. Returns the response text."""
     from config import (
         LLM_PROVIDER, OPENAI_API_KEY, OPENAI_MODEL,
@@ -98,6 +166,11 @@ def _llm_once(system: str, user: str, max_tokens: int = 1200) -> str:
             "input":             user,
             "max_output_tokens": max_tokens,
         }
+        if response_schema is not None:
+            payload["text"] = {"format": {
+                "type": "json_schema", "name": "extraction_response",
+                "strict": True, "schema": response_schema,
+            }}
         resp = _req.post(
             AZURE_ENDPOINT,
             headers={
@@ -150,7 +223,13 @@ def _llm_once(system: str, user: str, max_tokens: int = 1200) -> str:
     if not OPENAI_API_KEY:
         raise RuntimeError("OPENAI_API_KEY is not set in backtester/.env")
     client = openai.OpenAI(api_key=OPENAI_API_KEY)
-    resp   = client.chat.completions.create(
+    response_format = (
+        {"type": "json_schema", "json_schema": {
+            "name": "extraction_response", "strict": True, "schema": response_schema,
+        }}
+        if response_schema is not None else {"type": "json_object"}
+    )
+    resp = client.chat.completions.create(
         model=OPENAI_MODEL,
         max_tokens=max_tokens,
         temperature=0,
@@ -158,7 +237,7 @@ def _llm_once(system: str, user: str, max_tokens: int = 1200) -> str:
             {"role": "system", "content": system},
             {"role": "user",   "content": user},
         ],
-        response_format={"type": "json_object"},
+        response_format=response_format,
     )
     return resp.choices[0].message.content.strip()
 
@@ -410,6 +489,10 @@ Never add any other top-level key (no "name", "version", "market", "direction",
 "instrument" at the top level, etc.) — anything beyond entry/exit rules and the
 numeric params below belongs in "gaps" as prose, not as a new JSON field.
 
+IMPORTANT: the response schema requires "params" to be a JSON-encoded STRING
+(e.g. "{{\\"entry_rules\\": [], \\"stop_loss_pct\\": 3}}"), not a nested JSON
+object — serialize whatever params object you'd otherwise write as a string.
+
 (A) Known preset if conditions match exactly:
     {{"strategy": "<NAME>", "params": {{...}}}}
     Known presets: {sorted(_KNOWN_PRESETS)}
@@ -483,7 +566,9 @@ Reply with ONLY valid JSON (no markdown):
 
 
 def _normalize_to_ir(cleaned: dict[str, Any]) -> dict[str, Any]:
-    return _parse_json(_llm(_NORMALIZE_SYSTEM, json.dumps(cleaned, indent=2), max_tokens=1200))
+    result = _parse_json(_llm(_NORMALIZE_SYSTEM, json.dumps(cleaned, indent=2), max_tokens=1200,
+                               response_schema=NORMALIZE_RESPONSE_SCHEMA))
+    return _decode_params_string(result)
 
 
 _NORMALIZE_RETRY_SYSTEM = _NORMALIZE_SYSTEM + """
@@ -504,11 +589,17 @@ def _normalize_to_ir_with_retry(cleaned: dict[str, Any]) -> dict[str, Any]:
     pipeline (feed the model its own failure, ask it to try again with a
     firmer instruction) rather than giving up on the first null.
     """
-    result = _parse_json(_llm(_NORMALIZE_SYSTEM, json.dumps(cleaned, indent=2), max_tokens=1200))
+    result = _decode_params_string(_parse_json(_llm(
+        _NORMALIZE_SYSTEM, json.dumps(cleaned, indent=2), max_tokens=1200,
+        response_schema=NORMALIZE_RESPONSE_SCHEMA,
+    )))
     if result.get("strategy_ir"):
         return result
     logger.warning("normalize_to_ir returned null strategy_ir, retrying once with firmer instruction")
-    retry_result = _parse_json(_llm(_NORMALIZE_RETRY_SYSTEM, json.dumps(cleaned, indent=2), max_tokens=1200))
+    retry_result = _decode_params_string(_parse_json(_llm(
+        _NORMALIZE_RETRY_SYSTEM, json.dumps(cleaned, indent=2), max_tokens=1200,
+        response_schema=NORMALIZE_RESPONSE_SCHEMA,
+    )))
     return retry_result if retry_result.get("strategy_ir") else result
 
 

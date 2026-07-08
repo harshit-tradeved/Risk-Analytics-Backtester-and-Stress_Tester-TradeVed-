@@ -40,6 +40,28 @@ def test_normalize_ir_does_not_touch_dicts_with_no_rule_keys():
     assert normalize_ir(ir) == {"foo": "bar"}
 
 
+def test_normalize_ir_fixes_preset_name_paired_with_custom_params():
+    """Regression test: after constraining the extraction schema's "strategy"
+    field to a valid enum (to stop the model inventing names like
+    "long_only"), the model started picking a real preset name (e.g.
+    DONCHIAN) that matched the described indicator but still filled params
+    with CUSTOM's rule-builder fields (entry_rules/exit_rules) rather than
+    that preset's actual schema. Only CUSTOM ever has those fields."""
+    ir = {
+        "strategy": "DONCHIAN",
+        "params": {
+            "entry_rules": [{"left": {"price": "close"}, "operator": "cross_above",
+                              "right": {"indicator": "donchian", "params": {"length": 20}, "output": "dc_upper"}}],
+            "exit_rules": [],
+            "stop_loss_pct": 3,
+            "take_profit_pct": 6,
+        },
+    }
+    fixed = normalize_ir(ir)
+    assert fixed["strategy"] == "CUSTOM"
+    assert validate_ir(fixed) == []
+
+
 def test_normalize_ir_fixes_verbose_type_wrapper_operand_shapes():
     """Regression test: same Turtle Trading reel, a different LLM sampling
     run produced rule operands as {"type": "price", "source": "close"} and

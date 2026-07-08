@@ -100,6 +100,26 @@ def _hoist_flat_custom_shape(ir: dict) -> dict:
     return {"strategy": "CUSTOM", "params": merged_params}
 
 
+def _fix_preset_name_with_custom_params(ir: dict) -> dict:
+    """
+    Auto-fix: only CUSTOM ever has entry_rules/exit_rules in its params (see
+    strategies/custom.py) — no known preset (DONCHIAN, RSI, MACROSS, ...)
+    takes those fields. Seen live: constraining "strategy" to a valid enum
+    of registry names (to stop the model inventing names like "long_only")
+    just moved the drift one level down — the model now sometimes picks a
+    real preset name that happens to match the described indicator, but
+    still fills params with rule-builder fields instead of that preset's
+    actual schema. If params has entry_rules/exit_rules and strategy isn't
+    already CUSTOM, the strategy name is unambiguously wrong — force it.
+    """
+    if ir.get("strategy") == "CUSTOM":
+        return ir
+    params = ir.get("params")
+    if isinstance(params, dict) and ("entry_rules" in params or "exit_rules" in params):
+        ir["strategy"] = "CUSTOM"
+    return ir
+
+
 def normalize_ir(ir: dict) -> dict:
     """Mutates and returns `ir`, auto-fixing unambiguous LLM shape mistakes
     (top-level structure, then per-rule operand shapes) before validate_ir()
@@ -107,6 +127,7 @@ def normalize_ir(ir: dict) -> dict:
     if not isinstance(ir, dict):
         return ir
     ir = _hoist_flat_custom_shape(ir)
+    ir = _fix_preset_name_with_custom_params(ir)
     params = ir.get("params")
     if not isinstance(params, dict):
         return ir
