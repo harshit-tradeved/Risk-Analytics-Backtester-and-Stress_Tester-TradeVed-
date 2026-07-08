@@ -63,6 +63,14 @@ from orchestrator import pipeline as pipeline_orchestrator
 
 logger = logging.getLogger(__name__)
 
+# Local ingestion (yt-dlp download + ffmpeg + Groq Whisper + vision fallback)
+# has no internal timeout and can hang indefinitely on a stuck download
+# (observed live: YouTube throttling after several rapid requests). Bounding
+# it here means a stuck download fails the request cleanly instead of
+# hanging it forever — the orphaned background thread may keep running, but
+# it can no longer block the event loop or any other request.
+INGESTION_TIMEOUT_SECS = 150
+
 
 # ── JSON safety helpers ────────────────────────────────────────────────────────
 
@@ -1334,10 +1342,18 @@ async def analyze_reel(req: ReelAnalyzeRequest):
             # Local ingestion — yt-dlp + ffmpeg + Groq Whisper (ingestion.py)
             try:
                 from ingestion import handle_url as _ingest_url
-                data = await asyncio.to_thread(_ingest_url, req.url)
+                data = await asyncio.wait_for(
+                    asyncio.to_thread(_ingest_url, req.url), timeout=INGESTION_TIMEOUT_SECS,
+                )
                 # prefer original_source_text (on_screen_text + transcript combined)
                 transcript = data.get("original_source_text") or data.get("transcript", "")
                 caption    = data.get("caption", caption)
+            except asyncio.TimeoutError:
+                raise HTTPException(504, (
+                    f"Ingestion timed out after {INGESTION_TIMEOUT_SECS}s — the video download or "
+                    f"transcription took too long (or the source is unreachable). Try a shorter video "
+                    f"or paste the transcript directly instead."
+                ))
             except Exception as e:
                 raise HTTPException(502, f"Ingestion failed: {e}")
 
@@ -2800,9 +2816,17 @@ async def pipeline_start(req: PipelineStartRequest):
             # Local ingestion — yt-dlp + ffmpeg + Groq Whisper (ingestion.py)
             try:
                 from ingestion import handle_url as _ingest_url
-                data = await asyncio.to_thread(_ingest_url, req.url)
+                data = await asyncio.wait_for(
+                    asyncio.to_thread(_ingest_url, req.url), timeout=INGESTION_TIMEOUT_SECS,
+                )
                 transcript = data.get("original_source_text") or data.get("transcript", "")
                 caption    = data.get("caption", caption)
+            except asyncio.TimeoutError:
+                raise HTTPException(504, (
+                    f"Ingestion timed out after {INGESTION_TIMEOUT_SECS}s — the video download or "
+                    f"transcription took too long (or the source is unreachable). Try a shorter video "
+                    f"or paste the transcript directly instead."
+                ))
             except Exception as e:
                 raise HTTPException(502, f"Ingestion failed: {e}")
 
