@@ -22,7 +22,7 @@ from database import SessionLocal
 from improvement_agent import critique_and_improve
 from orchestrator.cache import compute_cache_key, find_cached_outcome
 from orchestrator.stages import (
-    fetch_and_validate_data, extract_ir, validate_and_normalize,
+    fetch_and_validate_data, extract_ir, validate_and_normalize, validate_and_repair,
     patch_ir_with_tweak, run_loop_round, run_holdout_check, build_report,
     apply_default_position_size,
 )
@@ -137,8 +137,8 @@ async def _run_pipeline(
                   ir_json=json.dumps(ir), report_json=json.dumps(report))
             return
 
-        # ── Validate IR ──
-        normalized, errors = validate_and_normalize(ir)
+        # ── Validate IR (with one self-repair attempt on schema drift) ──
+        normalized, errors = await asyncio.to_thread(validate_and_repair, ir)
         if errors:
             _save(db, row, status="failed", stage="validating_ir", error_message="; ".join(errors))
             return
@@ -167,7 +167,7 @@ async def _continue_after_checkpoint(run_id: str, action: str, tweak_text: Optio
 
         if action == "tweak" and tweak_text:
             ir = await asyncio.to_thread(patch_ir_with_tweak, ir, tweak_text, row.symbol, row.timeframe)
-            normalized, errors = validate_and_normalize(ir)
+            normalized, errors = await asyncio.to_thread(validate_and_repair, ir)
             if errors:
                 _save(db, row, status="failed", stage="patching_ir", error_message="; ".join(errors))
                 return

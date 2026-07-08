@@ -302,7 +302,19 @@ def _clean_and_isolate(transcript: str, caption: str = "") -> dict[str, Any]:
 
 _NORMALIZE_SYSTEM = f"""You are a trading strategy compiler. Your job is to convert structured trading conditions into a runnable Strategy IR JSON.
 
-IMPORTANT: Fill every gap you possibly can using the approved approximations below. Only add something to "gaps" if it is genuinely impossible to express with the available indicators.
+IMPORTANT — MANDATORY OUTPUT RULE: If the input describes ANY identifiable
+entry logic (even one condition), you MUST emit a non-null strategy_ir.
+"gaps" is informational only — it tells the user what was approximated or
+defaulted, it must NEVER be a reason to withhold strategy_ir. A strategy_ir
+with sensible defaults filled in and a long "gaps" list is always the
+correct output. Only withhold strategy_ir (set it to null) when there is
+truly zero identifiable entry condition anywhere in the input — that case
+should be rare, since triage already filtered out non-strategy content
+before this step ever runs.
+
+Fill every gap you possibly can using the approved approximations below,
+and when NONE of them apply, fall back to the MANDATORY DEFAULTS section
+at the end rather than leaving a field unset.
 
 ═══ APPROVED GAP-FILLING PATTERNS ═══
 Use these instead of adding to gaps:
@@ -347,7 +359,56 @@ Ichimoku Cloud strategy ("TK cross", "price above/below the cloud", "cloud break
   → TK cross entry rule: ichimoku() output tenkan_sen cross_above ichimoku() output kijun_sen
   → Cloud breakout entry rule: close cross_above ichimoku() output senkou_a
 
-═══ IR SCHEMA ═══
+Dynamic/rolling-price stop loss ("low of previous N candles", "recent swing low",
+"below the last N-candle low", trailing stop that follows price):
+  → exit rule: close cross_below donchian({{"length": N or 10}}) output dc_lower
+  → (mirror for shorts: close cross_above donchian({{"length": N or 10}}) output dc_upper)
+  → ALSO set stop_loss_pct to a conservative numeric estimate (see MANDATORY DEFAULTS)
+    so the engine still has a hard percent-based backstop even with the rule-based exit.
+
+Risk:reward ratio target when the stop isn't a flat percent (e.g. "1:2 R:R",
+"risk 1 to make 2", target based on stop distance):
+  → Approximate stop_loss_pct using the MANDATORY DEFAULTS value, then
+    take_profit_pct = stop_loss_pct * N (the ratio's second number).
+
+Position sizing described as "% risk per trade" (e.g. "risk 1% per trade") rather
+than a flat dollar amount:
+  → Convert to invest_per_trade_usd using the MANDATORY DEFAULTS capital assumption:
+    invest_per_trade_usd = round(10000 * risk_pct / 100 * 10)  [i.e. size the position
+    so a full stop-out roughly matches the stated risk fraction of a $10,000 account]
+  → If the risk % itself isn't numeric either, just use invest_per_trade_usd = 1000.
+
+Custom/proprietary/branded indicator names not in the catalog (e.g. a named
+"XYZ Oscillator", "ABC Trend Ribbon", a creator's own indicator brand):
+  → NEVER add these to gaps or drop the condition. Approximate using the closest
+    catalog indicator by DESCRIBED BEHAVIOR, not name:
+    - described as trend-strength / trend-following / "ribbon" / directional →
+      supertrend() or adx() or ema(50)/ema(200) crossover
+    - described as momentum / oscillator swinging between bounds →
+      rsi(14) or stochastic() or roc()
+    - described as volatility / squeeze / bands →
+      bollinger() or atr() or keltner()
+    - described as volume / money flow →
+      obv() or cmf(20) or mfi(14)
+  → State the approximation in "gaps" for transparency, but ALWAYS still include
+    the approximated rule in entry_rules/exit_rules — do not omit the condition.
+
+Vague/ambiguous stop-loss description with no number ("stop above the crossover",
+"stop below the trend line", "tight stop", any qualitative-only stop):
+  → set stop_loss_pct to the MANDATORY DEFAULTS value. Note the approximation in gaps.
+
+Ambiguous or filler timeframe mention ("the time frame", "this timeframe", "on the
+chart" with no concrete unit):
+  → suggested_interval = "1d" (same as when timeframe is unmentioned entirely).
+    Never add timeframe to gaps merely for being vague — only if a specific,
+    unresolvable custom timeframe is explicitly demanded.
+
+═══ IR SCHEMA — FOLLOW EXACTLY, NO EXCEPTIONS ═══
+
+strategy_ir has EXACTLY two top-level keys, always: "strategy" and "params".
+Never add any other top-level key (no "name", "version", "market", "direction",
+"instrument" at the top level, etc.) — anything beyond entry/exit rules and the
+numeric params below belongs in "gaps" as prose, not as a new JSON field.
 
 (A) Known preset if conditions match exactly:
     {{"strategy": "<NAME>", "params": {{...}}}}
@@ -365,10 +426,13 @@ Ichimoku Cloud strategy ("TK cross", "price above/below the cloud", "cloud break
         "take_profit_pct": 0            // set > 0 if take profit % mentioned
       }}
     }}
+    entry_rules/exit_rules live INSIDE "params", never as top-level siblings of "params".
 
-Rule shape:
+Rule shape — use these EXACT field names, no substitutes:
   {{"left": {{"indicator":"<key>","params":{{}},"output":"<col>"}}, "operator":"<op>", "right": {{"value":<n>}}}}
   Use {{"price": "close"}} to reference a raw price column.
+  The comparison field is ALWAYS named "operator" (never "op"). Indicator references are
+  ALWAYS named "indicator" (never "type"/"name" nesting). Do not restructure this shape.
 
 Available indicators:
 {_INDICATOR_KEYS}
@@ -388,16 +452,29 @@ Also extract from the content:
 - suggested_interval: map timeframe to one of: "1m","3m","5m","15m","30m","1h","4h","1d","1w"
   - If not mentioned → "1d"
 
+═══ MANDATORY DEFAULTS ═══
+Apply these whenever a field is unspecified or only qualitatively described —
+they exist so strategy_ir is NEVER null just because one field lacked an
+exact number. Always list what you defaulted in "gaps" for transparency.
+- invest_per_trade_usd → 1000
+- stop_loss_pct        → 3    (conservative short-term default)
+- take_profit_pct      → 6    (2:1 reward:risk against the default stop)
+- suggested_interval   → "1d"
+- entry_rules / exit_rules → [] is acceptable ONLY if genuinely no rule-based
+  condition exists AND stop_loss_pct/take_profit_pct alone define the trade;
+  never use [] as a way to avoid approximating a described condition.
+
 ═══ RULES ═══
 - Only use indicators in the catalog above. Never invent new ones.
-- Apply every approved gap-filling pattern before adding to gaps.
-- Only add to "gaps" if truly inexpressible.
-- invest_per_trade_usd defaults to 1000 if not specified.
+- Apply every approved gap-filling pattern before falling back to MANDATORY DEFAULTS.
+- strategy_ir must be non-null whenever any entry condition is identifiable — see
+  the MANDATORY OUTPUT RULE at the top. Gaps describe approximations, they never
+  justify withholding strategy_ir.
 
 Reply with ONLY valid JSON (no markdown):
 {{
   "strategy_ir": {{...}},
-  "gaps": ["<only truly inexpressible constraints>", ...],
+  "gaps": ["<approximations and defaults applied, for user transparency>", ...],
   "confidence": 0.0-1.0,
   "suggested_symbol": "<ticker or null>",
   "suggested_source": "<binance|yfinance|nse|bse or null>",
@@ -407,6 +484,32 @@ Reply with ONLY valid JSON (no markdown):
 
 def _normalize_to_ir(cleaned: dict[str, Any]) -> dict[str, Any]:
     return _parse_json(_llm(_NORMALIZE_SYSTEM, json.dumps(cleaned, indent=2), max_tokens=1200))
+
+
+_NORMALIZE_RETRY_SYSTEM = _NORMALIZE_SYSTEM + """
+
+═══ RETRY NOTICE ═══
+Your previous attempt on this exact input returned strategy_ir: null. That is
+not an acceptable output per the MANDATORY OUTPUT RULE above — this input DOES
+have an identifiable entry condition. Apply the MANDATORY DEFAULTS section
+and any matching APPROVED GAP-FILLING PATTERN to build a working strategy_ir
+now. Do not return null again."""
+
+
+def _normalize_to_ir_with_retry(cleaned: dict[str, Any]) -> dict[str, Any]:
+    """
+    One deterministic retry if the model still withholds strategy_ir despite
+    the prompt's mandatory-output rule — mirrors the same self-repair pattern
+    improvement_agent.repair_improved_ir() already uses elsewhere in this
+    pipeline (feed the model its own failure, ask it to try again with a
+    firmer instruction) rather than giving up on the first null.
+    """
+    result = _parse_json(_llm(_NORMALIZE_SYSTEM, json.dumps(cleaned, indent=2), max_tokens=1200))
+    if result.get("strategy_ir"):
+        return result
+    logger.warning("normalize_to_ir returned null strategy_ir, retrying once with firmer instruction")
+    retry_result = _parse_json(_llm(_NORMALIZE_RETRY_SYSTEM, json.dumps(cleaned, indent=2), max_tokens=1200))
+    return retry_result if retry_result.get("strategy_ir") else result
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -430,7 +533,7 @@ def extract_strategy_ir(transcript: str, caption: str = "") -> dict[str, Any]:
         return {"strategy_ir": None, "gaps": [], "confidence": 0.0, "error": str(e)}
 
     try:
-        result = _normalize_to_ir(cleaned)
+        result = _normalize_to_ir_with_retry(cleaned)
     except Exception as e:
         logger.error("extract P2 failed: %s", e)
         return {"strategy_ir": None, "gaps": [], "confidence": 0.0,

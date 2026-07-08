@@ -58,6 +58,30 @@ def validate_and_normalize(ir: dict[str, Any]) -> tuple[dict[str, Any], list[str
     return normalized, errors
 
 
+def validate_and_repair(ir: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """
+    Like validate_and_normalize, but if the extracted IR fails schema
+    validation (e.g. the model invented its own top-level shape instead of
+    following the {"strategy": ..., "params": {...}} schema — observed live
+    on a real reel after a prompt change), makes one self-repair attempt via
+    improvement_agent.repair_improved_ir() before giving up. Reuses the same
+    repair mechanic already used for the improve-strategy flow rather than
+    adding a second one.
+    """
+    normalized, errors = validate_and_normalize(ir)
+    if not errors:
+        return normalized, errors
+
+    from improvement_agent import repair_improved_ir
+    repaired = repair_improved_ir(ir, errors, ir)
+    if not isinstance(repaired, dict):
+        return normalized, errors
+    repaired_normalized, repaired_errors = validate_and_normalize(repaired)
+    if not repaired_errors:
+        return repaired_normalized, []
+    return normalized, errors
+
+
 # Classic strategies already get every field filled in from their own
 # default_params() when a backtest actually runs (see run_loop_round below),
 # so a missing position-size field never blocks them. Only CUSTOM/indicator

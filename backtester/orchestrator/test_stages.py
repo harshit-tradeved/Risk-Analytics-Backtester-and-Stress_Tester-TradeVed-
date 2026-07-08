@@ -1,5 +1,51 @@
 import pandas as pd
-from orchestrator.stages import validate_and_normalize, run_loop_round, build_report, apply_default_position_size
+from orchestrator.stages import (
+    validate_and_normalize, run_loop_round, build_report,
+    apply_default_position_size, validate_and_repair,
+)
+
+
+def test_validate_and_repair_passes_through_when_already_valid():
+    ir = {"strategy": "DCA", "params": {"buy_interval_hours": 24, "invest_per_buy_usd": 100}}
+    normalized, errors = validate_and_repair(ir)
+    assert errors == []
+    assert normalized["strategy"] == "DCA"
+
+
+def test_validate_and_repair_fixes_schema_drift_via_llm_repair(monkeypatch):
+    """Regression test: a real reel once produced an IR with invented
+    top-level keys (name/version/market/direction) instead of the exact
+    {strategy, params} schema. validate_and_repair should catch that via
+    validate_ir's errors and fix it with one improvement_agent.repair_improved_ir()
+    call rather than failing outright."""
+    import improvement_agent
+
+    drifted_ir = {"name": "my_strategy", "entry_rules": [], "direction": "long"}
+    fixed_ir = {
+        "strategy": "CUSTOM",
+        "params": {
+            "entry_rules": [{"left": {"indicator": "rsi", "params": {}, "output": "rsi"}, "operator": "<", "right": {"value": 30}}],
+            "exit_rules": [], "logic": "AND",
+        },
+    }
+
+    def fake_repair(ir, errors, original_ir):
+        assert ir is drifted_ir
+        return fixed_ir
+
+    monkeypatch.setattr(improvement_agent, "repair_improved_ir", fake_repair)
+    normalized, errors = validate_and_repair(drifted_ir)
+    assert errors == []
+    assert normalized["strategy"] == "CUSTOM"
+
+
+def test_validate_and_repair_gives_up_if_repair_still_invalid(monkeypatch):
+    import improvement_agent
+
+    drifted_ir = {"totally": "wrong"}
+    monkeypatch.setattr(improvement_agent, "repair_improved_ir", lambda ir, errors, original_ir: {"still": "wrong"})
+    normalized, errors = validate_and_repair(drifted_ir)
+    assert len(errors) > 0
 
 
 def test_apply_default_position_size_fills_missing_invest_per_trade_usd():

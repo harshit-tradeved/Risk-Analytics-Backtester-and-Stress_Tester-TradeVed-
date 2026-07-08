@@ -32,6 +32,21 @@ def _normalize_operand(operand: Any) -> Any:
         return {"value": float(operand)}
     if not isinstance(operand, dict):
         return operand
+    # {"type": "price", "source"/"field": "close"} — a verbose wrapper style
+    # seen on real reel extractions instead of the plain {"price": "close"}.
+    if operand.get("type") == "price":
+        col = operand.get("source") or operand.get("field") or operand.get("price")
+        if col:
+            return {"price": col}
+    # {"type": "indicator", "name": "<key>", "params": {...}, "output": "<col>"}
+    # — same verbose-wrapper drift, indicator variant.
+    if operand.get("type") == "indicator" and "name" in operand:
+        out = {"indicator": operand["name"]}
+        if "params" in operand:
+            out["params"] = operand["params"]
+        if "output" in operand:
+            out["output"] = operand["output"]
+        return out
     # {"indicator": "close"} etc. — LLM confused a raw price column with an
     # indicator key (INDICATOR_CATALOG has no "close"/"open"/... entries).
     if "indicator" in operand and operand.get("indicator") in _PRICE_COLS and "price" not in operand:
@@ -47,6 +62,9 @@ def _normalize_operand(operand: Any) -> Any:
 def _normalize_rule(rule: Any) -> Any:
     if not isinstance(rule, dict):
         return rule
+    # "op" used instead of "operator" — another observed key-name variant.
+    if "operator" not in rule and "op" in rule:
+        rule["operator"] = rule.pop("op")
     if "left" in rule:
         rule["left"] = _normalize_operand(rule["left"])
     if "right" in rule:
@@ -54,11 +72,41 @@ def _normalize_rule(rule: Any) -> Any:
     return rule
 
 
+def _hoist_flat_custom_shape(ir: dict) -> dict:
+    """
+    Auto-fix for a recurring extraction-LLM drift: instead of
+    {"strategy": "CUSTOM", "params": {"entry_rules": [...], ...}}, the model
+    sometimes emits entry_rules/exit_rules as top-level siblings of a
+    "params" dict that only holds the numeric fields (stop_loss_pct etc),
+    often with extra invented keys (name/version/metadata/direction/
+    long_short/instrument/...). Seen live even after prompt hardening and a
+    repair-LLM retry both failed to correct it — this is exactly the kind of
+    unambiguous, describable shape mistake this module already auto-fixes
+    for rule operands, so it gets the same deterministic treatment rather
+    than a third LLM call: if "strategy" is missing but entry_rules/exit_rules
+    exist at the top level, it's unambiguously a mis-shaped CUSTOM strategy.
+    """
+    if "strategy" in ir:
+        return ir
+    if "entry_rules" not in ir and "exit_rules" not in ir:
+        return ir
+    existing_params = ir.get("params") if isinstance(ir.get("params"), dict) else {}
+    merged_params = {
+        "entry_rules": ir.get("entry_rules", []),
+        "exit_rules":  ir.get("exit_rules", []),
+        "logic": existing_params.get("logic", "AND"),
+        **{k: v for k, v in existing_params.items() if k not in ("entry_rules", "exit_rules", "logic")},
+    }
+    return {"strategy": "CUSTOM", "params": merged_params}
+
+
 def normalize_ir(ir: dict) -> dict:
-    """Mutates and returns `ir`, auto-fixing unambiguous LLM operand-shape
-    mistakes in CUSTOM entry_rules/exit_rules before validate_ir() runs."""
+    """Mutates and returns `ir`, auto-fixing unambiguous LLM shape mistakes
+    (top-level structure, then per-rule operand shapes) before validate_ir()
+    runs."""
     if not isinstance(ir, dict):
         return ir
+    ir = _hoist_flat_custom_shape(ir)
     params = ir.get("params")
     if not isinstance(params, dict):
         return ir
