@@ -54,6 +54,11 @@ def _ensure_columns():
             ("source_platform", "VARCHAR(20)"),
             ("source_creator", "VARCHAR(120)"),
         ],
+        "pipeline_runs": [
+            ("source", "VARCHAR(20)"),
+            ("capital", "FLOAT"),
+            ("disclaimer", "TEXT"),
+        ],
     }
     with engine.connect() as conn:
         for table, cols in additions.items():

@@ -106,6 +106,32 @@ def apply_default_position_size(ir: dict[str, Any], capital: float) -> dict[str,
     return ir
 
 
+def build_fallback_suggestion(transcript: str, caption: str, gaps: list[str]) -> dict[str, Any]:
+    """When extract_ir() genuinely fails (strategy_ir is None, even after its
+    own internal retry), ask for a practical disclaimer plus a best-choice
+    minimal-viable strategy_ir instead of dead-ending the run."""
+    from reel_extractor import suggest_fallback_ir
+    return suggest_fallback_ir(transcript, caption, gaps)
+
+
+def resolve_run_target(
+    symbol: Optional[str], source: Optional[str], interval: Optional[str], extraction: dict[str, Any],
+) -> tuple[str, str, str]:
+    """
+    Picks the symbol/source/interval a run actually executes with. An
+    explicit caller-supplied value always wins; otherwise falls back to
+    extract_strategy_ir()'s own suggested_symbol/suggested_source/
+    suggested_interval (inferred from the transcript itself — e.g. an NSE
+    stock reel should run on nse/RELIANCE, not the crypto defaults), and
+    only falls back to the hardcoded defaults if extraction suggested
+    nothing either.
+    """
+    resolved_symbol = symbol or extraction.get("suggested_symbol") or "BTC/USDT"
+    resolved_source = source or extraction.get("suggested_source") or "binance"
+    resolved_interval = interval or extraction.get("suggested_interval") or "1d"
+    return resolved_symbol, resolved_source, resolved_interval
+
+
 def patch_ir_with_tweak(ir: dict[str, Any], tweak: str, symbol: str, interval: str) -> dict[str, Any]:
     """
     User typed a tweak during the checkpoint window. Reuses the same

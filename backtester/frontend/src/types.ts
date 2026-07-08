@@ -715,5 +715,6 @@ export interface PipelineRunState {
   holdout_result: { verdict: string; in_sample: unknown; out_of_sample: unknown } | null;
   report: PipelineReport | null;
   error_message: string | null;
+  disclaimer: string | null;
   ir: { strategy: string; params: Record<string, unknown> } | null;
 }

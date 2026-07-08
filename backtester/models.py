@@ -253,6 +253,8 @@ class PipelineRun(Base):
     ir_json     = Column(Text)
     symbol      = Column(String(20))
     timeframe   = Column(String(10))
+    source      = Column(String(20))          # binance | yfinance | nse | bse — data source for this run
+    capital     = Column(Float)               # user-submitted capital, threaded through loop/holdout (falls back to DEFAULT_CAPITAL if unset)
     source_url      = Column(String(500))
     source_platform = Column(String(20))
     source_creator  = Column(String(120))
@@ -265,6 +267,7 @@ class PipelineRun(Base):
     checkpoint_timeout_secs = Column(Integer)   # random 60-100, fixed once at checkpoint-open
 
     holdout_result_json = Column(Text)
+    disclaimer          = Column(Text)   # practical, plain-language note when the IR is a fallback suggestion, not a real extraction
     report_json          = Column(Text)
     paper_trading_task_id = Column(String(36))
     error_message         = Column(Text)

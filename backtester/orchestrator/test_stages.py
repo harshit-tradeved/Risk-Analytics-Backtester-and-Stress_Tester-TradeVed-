@@ -1,8 +1,52 @@
 import pandas as pd
 from orchestrator.stages import (
     validate_and_normalize, run_loop_round, build_report,
-    apply_default_position_size, validate_and_repair,
+    apply_default_position_size, validate_and_repair, resolve_run_target,
+    build_fallback_suggestion,
 )
+
+
+def test_build_fallback_suggestion_delegates_to_reel_extractor(monkeypatch):
+    import reel_extractor
+
+    def fake_suggest(transcript, caption, gaps):
+        assert transcript == "buy near support"
+        assert gaps == ["no numeric entry"]
+        return {
+            "disclaimer": "too vague", "strategy_ir": {"strategy": "DCA", "params": {}},
+            "suggested_symbol": None, "suggested_source": None, "suggested_interval": None,
+        }
+
+    monkeypatch.setattr(reel_extractor, "suggest_fallback_ir", fake_suggest)
+    result = build_fallback_suggestion("buy near support", "", ["no numeric entry"])
+    assert result["disclaimer"] == "too vague"
+    assert result["strategy_ir"]["strategy"] == "DCA"
+
+
+def test_resolve_run_target_uses_explicit_values_when_given():
+    symbol, source, interval = resolve_run_target(
+        "ETH/USDT", "binance", "4h",
+        {"suggested_symbol": "BTC/USDT", "suggested_source": "yfinance", "suggested_interval": "1h"},
+    )
+    assert (symbol, source, interval) == ("ETH/USDT", "binance", "4h")
+
+
+def test_resolve_run_target_falls_back_to_extraction_suggestions_when_unset():
+    """Regression test: extract_strategy_ir() computes suggested_symbol/
+    suggested_source/suggested_interval from the transcript (e.g. a reel
+    about an NSE stock), but nothing downstream ever read them — the run
+    just silently used whatever the caller defaulted symbol/source/interval
+    to, ignoring what the video actually described."""
+    symbol, source, interval = resolve_run_target(
+        None, None, None,
+        {"suggested_symbol": "RELIANCE", "suggested_source": "nse", "suggested_interval": "1d"},
+    )
+    assert (symbol, source, interval) == ("RELIANCE", "nse", "1d")
+
+
+def test_resolve_run_target_falls_back_to_hardcoded_defaults_when_nothing_suggested():
+    symbol, source, interval = resolve_run_target(None, None, None, {})
+    assert (symbol, source, interval) == ("BTC/USDT", "binance", "1d")
 
 
 def test_validate_and_repair_passes_through_when_already_valid():

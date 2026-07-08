@@ -565,6 +565,120 @@ Reply with ONLY valid JSON (no markdown):
 }}"""
 
 
+# ── Fallback suggestion (genuine extraction failure) ─────────────────────────
+# _normalize_to_ir_with_retry already makes one deterministic retry with a
+# firmer instruction before giving up — so a strategy_ir: null reaching this
+# point means the content is genuinely discretionary/visual ("buy near
+# support", "sell when it looks toppy") or too sparse to extract any rule
+# from at all. Per explicit product direction: the pipeline should never just
+# dead-end here. This makes one more LLM call whose job is NOT extraction —
+# it's to (a) explain in plain language what's insufficient and why, and
+# (b) produce a best-choice, always-runnable minimal-viable IR the user can
+# review/edit at the same checkpoint the normal path uses, rather than a raw
+# failure. strategy_ir is NOT nullable in this schema (unlike
+# NORMALIZE_RESPONSE_SCHEMA) — a fallback suggestion must always exist.
+FALLBACK_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "disclaimer": {"type": "string"},
+        "strategy_ir": {
+            "type": "object",
+            "properties": {
+                "strategy": {"type": "string", "enum": sorted(STRATEGY_REGISTRY.keys())},
+                "params": {"type": "string", "description": "JSON-encoded object, e.g. '{\"entry_rules\": [], ...}'"},
+            },
+            "required": ["strategy", "params"],
+            "additionalProperties": False,
+        },
+        "suggested_symbol":   {"anyOf": [{"type": "string"}, {"type": "null"}]},
+        "suggested_source":   {"anyOf": [{"type": "string"}, {"type": "null"}]},
+        "suggested_interval": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+    },
+    "required": ["disclaimer", "strategy_ir", "suggested_symbol", "suggested_source", "suggested_interval"],
+    "additionalProperties": False,
+}
+
+_FALLBACK_SYSTEM = """You are a trading-strategy assistant. A previous extraction
+attempt on this transcript could NOT produce a rule-based Strategy IR — likely
+because it describes a discretionary/visual pattern (e.g. "buy near support",
+"sell when the chart looks toppy") rather than precise numeric rules, or is
+missing key pieces entirely (no clear entry, no instrument named, etc).
+
+Your job now is NOT to try extraction again. Instead, produce two things:
+
+1. "disclaimer" — a short, PRACTICAL, plain-language explanation (2-4
+   sentences) for a non-technical user of what's insufficient about THIS
+   specific content and why an automated backtest can't run it as-is. Be
+   concrete: name the specific thing that would need to be numeric/rule-based
+   (e.g. "the video says 'buy near support' but never gives a precise price
+   level or indicator rule for what counts as support").
+
+2. "strategy_ir" — a best-choice, always-runnable strategy the user can start
+   from and edit. Never leave this un-runnable. Rules:
+   - Entry/exit: if the transcript describes ANYTHING rule-shaped even
+     loosely, approximate it with the closest indicator preset (RSI
+     oversold/overbought, MA crossover, Donchian breakout, Bollinger).
+     If truly nothing rule-shaped is describable, default to DCA
+     (buy_interval_hours=24, invest_per_buy_usd=1000) — it needs no entry
+     rule and always runs.
+   - Missing stop_loss_pct -> 3, missing take_profit_pct -> 6.
+   - Missing position size (invest_per_trade_usd / invest_per_buy_usd) -> 1000.
+   - suggested_symbol/source/interval: infer what you can from context;
+     default suggested_interval to "1d" if genuinely unstated.
+
+Output ONLY JSON, no markdown, no commentary:
+{
+  "disclaimer": "<plain-language explanation>",
+  "strategy_ir": {"strategy": "<NAME>", "params": "<JSON-encoded string>"},
+  "suggested_symbol": "<ticker or null>",
+  "suggested_source": "<binance|yfinance|nse|bse or null>",
+  "suggested_interval": "<interval or null>"
+}"""
+
+_FALLBACK_DCA_IR = {"strategy": "DCA", "params": {"buy_interval_hours": 24, "invest_per_buy_usd": 1000}}
+
+
+def suggest_fallback_ir(transcript: str, caption: str, gaps: list[str]) -> dict[str, Any]:
+    """
+    Called when extract_strategy_ir() genuinely could not produce a
+    strategy_ir (even after its own retry) — e.g. discretionary/visual
+    content, or a video with too little stated to extract from at all.
+    Rather than dead-ending the pipeline run, returns a practical,
+    plain-language disclaimer plus a best-choice minimal-viable strategy_ir
+    for the user to review/edit at the checkpoint. Never raises — an LLM
+    failure here falls back to a hardcoded safe-default DCA suggestion so
+    the user is never left with nothing.
+    """
+    payload = {"transcript": _sanitize_llm_text(transcript), "caption": caption, "known_gaps": gaps}
+    try:
+        raw = _llm(_FALLBACK_SYSTEM, json.dumps(payload, indent=2), max_tokens=900,
+                   response_schema=FALLBACK_RESPONSE_SCHEMA)
+        result = _decode_params_string(_parse_json(raw))
+        strategy_ir = result.get("strategy_ir") or _FALLBACK_DCA_IR
+        return {
+            "disclaimer": result.get("disclaimer") or (
+                "Not enough precise, numeric detail was found in this content to build "
+                "a rule-based strategy — here's a safe generic starting point instead."
+            ),
+            "strategy_ir": strategy_ir,
+            "suggested_symbol":   result.get("suggested_symbol"),
+            "suggested_source":   result.get("suggested_source"),
+            "suggested_interval": result.get("suggested_interval"),
+        }
+    except Exception as e:
+        logger.error("suggest_fallback_ir failed: %s", e)
+        return {
+            "disclaimer": (
+                "This video didn't contain enough precise, numeric detail to build a "
+                "testable strategy, and a fallback suggestion couldn't be generated "
+                "either right now. Here's a safe generic starting point you can edit: "
+                "a simple daily DCA buying a fixed dollar amount every 24 hours."
+            ),
+            "strategy_ir": _FALLBACK_DCA_IR,
+            "suggested_symbol": None, "suggested_source": None, "suggested_interval": None,
+        }
+
+
 def _normalize_to_ir(cleaned: dict[str, Any]) -> dict[str, Any]:
     result = _parse_json(_llm(_NORMALIZE_SYSTEM, json.dumps(cleaned, indent=2), max_tokens=1200,
                                response_schema=NORMALIZE_RESPONSE_SCHEMA))

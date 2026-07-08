@@ -115,6 +115,12 @@ export default function PipelinePage({ userId }: { userId: string }) {
 
           {run.status === "awaiting_checkpoint" && (
             <div className="border rounded p-3 space-y-2">
+              {run.disclaimer && (
+                <div className="border border-amber-400 bg-amber-50 rounded p-3 text-amber-800 text-sm">
+                  <strong>Heads up:</strong> {run.disclaimer} We've suggested a reasonable
+                  starting point below — review it, tweak anything that doesn't fit, or confirm as-is.
+                </div>
+              )}
               <p>Confirm this strategy, or type a change (60–100s before we auto-proceed):</p>
               <pre className="text-xs bg-gray-100 p-2 rounded">{JSON.stringify(run.ir, null, 2)}</pre>
               <button className="px-3 py-1 rounded bg-indigo-600 text-white" onClick={handleConfirm}>

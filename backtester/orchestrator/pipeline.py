@@ -24,7 +24,7 @@ from orchestrator.cache import compute_cache_key, find_cached_outcome
 from orchestrator.stages import (
     fetch_and_validate_data, extract_ir, validate_and_normalize, validate_and_repair,
     patch_ir_with_tweak, run_loop_round, run_holdout_check, build_report,
-    apply_default_position_size,
+    apply_default_position_size, resolve_run_target, build_fallback_suggestion,
 )
 
 logger = logging.getLogger(__name__)
@@ -83,7 +83,8 @@ def _save(db: Session, row: models.PipelineRun, **fields) -> None:
 
 
 def start_run(
-    user_id: str, transcript: str, caption: str, symbol: str, source: str, interval: str,
+    user_id: str, transcript: str, caption: str,
+    symbol: Optional[str], source: Optional[str], interval: Optional[str],
     start_date: date, end_date: date, capital: float, tweak: Optional[str] = None,
 ) -> str:
     assert_no_active_run(user_id)
@@ -92,20 +93,20 @@ def start_run(
     try:
         row = models.PipelineRun(
             id=run_id, user_id=user_id, status="running", stage="extracting",
-            symbol=symbol, timeframe=interval,
+            symbol=symbol, timeframe=interval, source=source, capital=capital,
         )
         db.add(row)
         db.commit()
     finally:
         db.close()
 
-    task = asyncio.create_task(_run_pipeline(run_id, transcript, caption, source, start_date, end_date, capital, tweak))
+    task = asyncio.create_task(_run_pipeline(run_id, transcript, caption, start_date, end_date, capital, tweak))
     _live_tasks[run_id] = task
     return run_id
 
 
 async def _run_pipeline(
-    run_id: str, transcript: str, caption: str, source: str,
+    run_id: str, transcript: str, caption: str,
     start_date: date, end_date: date, capital: float, tweak: Optional[str],
 ) -> None:
     db = SessionLocal()
@@ -115,15 +116,33 @@ async def _run_pipeline(
         # ── Extract ──
         extraction = await asyncio.to_thread(extract_ir, transcript, caption, tweak)
         ir = extraction.get("strategy_ir")
+        disclaimer = None
         if not isinstance(ir, dict):
+            # Genuine extraction failure (even after extract_ir's own internal
+            # retry) — usually discretionary/visual content. Rather than
+            # dead-ending, get a practical disclaimer + best-choice
+            # minimal-viable IR the user can review/edit at the checkpoint.
             gaps = extraction.get("gaps") or []
-            message = extraction.get("error") or (
-                f"Could not extract a runnable strategy from this input. "
-                f"{'Missing details: ' + '; '.join(gaps) if gaps else 'The described logic could not be mapped to a supported indicator/rule.'}"
-            )
-            _save(db, row, status="failed", stage="extracting", error_message=message)
-            return
+            fallback = await asyncio.to_thread(build_fallback_suggestion, transcript, caption, gaps)
+            disclaimer = fallback.get("disclaimer")
+            ir = fallback.get("strategy_ir")
+            extraction = {
+                **extraction,
+                "suggested_symbol":   fallback.get("suggested_symbol")   or extraction.get("suggested_symbol"),
+                "suggested_source":   fallback.get("suggested_source")   or extraction.get("suggested_source"),
+                "suggested_interval": fallback.get("suggested_interval") or extraction.get("suggested_interval"),
+            }
+            if not isinstance(ir, dict):
+                message = extraction.get("error") or (
+                    f"Could not extract a runnable strategy from this input. "
+                    f"{'Missing details: ' + '; '.join(gaps) if gaps else 'The described logic could not be mapped to a supported indicator/rule.'}"
+                )
+                _save(db, row, status="failed", stage="extracting", error_message=message)
+                return
         ir = apply_default_position_size(ir, capital)
+
+        symbol, source, interval = resolve_run_target(row.symbol, row.source, row.timeframe, extraction)
+        _save(db, row, symbol=symbol, source=source, timeframe=interval, disclaimer=disclaimer)
 
         # ── Cache lookup ──
         cache_key = compute_cache_key(ir, row.symbol, row.timeframe)
@@ -187,11 +206,11 @@ async def _run_loop_and_beyond(run_id: str) -> None:
         row = db.query(models.PipelineRun).filter_by(id=run_id).first()
         ir = json.loads(row.ir_json)
         df = await asyncio.to_thread(
-            fetch_and_validate_data, row.symbol, "binance", row.timeframe,
+            fetch_and_validate_data, row.symbol, row.source or "binance", row.timeframe,
             date.today() - timedelta(days=LOOKBACK_DAYS), date.today(),
         )
         sim_kwargs = {"symbol": row.symbol}
-        capital = DEFAULT_CAPITAL
+        capital = row.capital or DEFAULT_CAPITAL
         scores: list[dict] = json.loads(row.composite_scores_json or "[]")
 
         for round_num in range(1, LOOP_ROUND_CAP + 1):
@@ -298,6 +317,7 @@ def retry_with_new_symbol(run_id: str, new_symbol: str) -> str:
         new_row = models.PipelineRun(
             id=new_id, user_id=old.user_id, status="looping", stage="loop_round_1",
             ir_json=old.ir_json, symbol=new_symbol, timeframe=old.timeframe,
+            source=old.source, capital=old.capital,
             loop_round=0, composite_scores_json=json.dumps([]),
         )
         db.add(new_row)

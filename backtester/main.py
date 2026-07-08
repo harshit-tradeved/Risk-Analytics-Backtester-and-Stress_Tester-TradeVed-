@@ -1245,9 +1245,9 @@ class PipelineStartRequest(BaseModel):
     transcript: Optional[str] = None
     caption:    Optional[str] = None
     tweak:      Optional[str] = Field(None, description="Optional free-text modification submitted alongside the input")
-    symbol:     str = Field("BTC/USDT")
-    source:     str = Field("binance")
-    interval:   str = Field("1d")
+    symbol:     Optional[str] = Field(None, description="Explicit override; if unset, uses the extraction's suggested_symbol")
+    source:     Optional[str] = Field(None, description="Explicit override; if unset, uses the extraction's suggested_source")
+    interval:   Optional[str] = Field(None, description="Explicit override; if unset, uses the extraction's suggested_interval")
     start_date: date = Field(default_factory=lambda: date.today() - timedelta(days=730))
     end_date:   date = Field(default_factory=date.today)
     capital:    float = Field(10_000.0)
@@ -2858,6 +2858,7 @@ def pipeline_get(run_id: str, db: Session = Depends(get_db)):
         "holdout_result": json.loads(row.holdout_result_json) if row.holdout_result_json else None,
         "report": json.loads(row.report_json) if row.report_json else None,
         "error_message": row.error_message,
+        "disclaimer": row.disclaimer,
         "ir": json.loads(row.ir_json) if row.ir_json else None,
     }
 
