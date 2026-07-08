@@ -58,6 +58,30 @@ def validate_and_normalize(ir: dict[str, Any]) -> tuple[dict[str, Any], list[str
     return normalized, errors
 
 
+# Classic strategies already get every field filled in from their own
+# default_params() when a backtest actually runs (see run_loop_round below),
+# so a missing position-size field never blocks them. Only CUSTOM/indicator
+# presets read invest_per_trade_usd — that's the field reel_extractor's own
+# prompt already tries to default to 1000, but sometimes withholds when
+# bundling it in with other, genuinely-blocking gaps (e.g. a stop-loss the
+# schema can't express). This makes that default deterministic in code
+# instead of depending on the LLM to have applied its own instruction.
+_CLASSIC_STRATEGIES = {"DCA", "GRID", "PLA"}
+
+
+def apply_default_position_size(ir: dict[str, Any], capital: float) -> dict[str, Any]:
+    """Fill a missing/zero invest_per_trade_usd with a capital-scaled default
+    (10% of capital, floor $100 / cap $2000) for non-classic strategies."""
+    strategy = str(ir.get("strategy", "")).upper()
+    if strategy in _CLASSIC_STRATEGIES:
+        return ir
+    params = ir.get("params", {}) or {}
+    if not params.get("invest_per_trade_usd"):
+        params = {**params, "invest_per_trade_usd": max(100.0, min(capital * 0.1, 2000.0))}
+        ir = {**ir, "params": params}
+    return ir
+
+
 def patch_ir_with_tweak(ir: dict[str, Any], tweak: str, symbol: str, interval: str) -> dict[str, Any]:
     """
     User typed a tweak during the checkpoint window. Reuses the same

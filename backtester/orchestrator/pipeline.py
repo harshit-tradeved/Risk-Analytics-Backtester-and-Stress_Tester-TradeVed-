@@ -24,6 +24,7 @@ from orchestrator.cache import compute_cache_key, find_cached_outcome
 from orchestrator.stages import (
     fetch_and_validate_data, extract_ir, validate_and_normalize,
     patch_ir_with_tweak, run_loop_round, run_holdout_check, build_report,
+    apply_default_position_size,
 )
 
 logger = logging.getLogger(__name__)
@@ -122,6 +123,7 @@ async def _run_pipeline(
             )
             _save(db, row, status="failed", stage="extracting", error_message=message)
             return
+        ir = apply_default_position_size(ir, capital)
 
         # ── Cache lookup ──
         cache_key = compute_cache_key(ir, row.symbol, row.timeframe)

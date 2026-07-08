@@ -1,5 +1,27 @@
 import pandas as pd
-from orchestrator.stages import validate_and_normalize, run_loop_round, build_report
+from orchestrator.stages import validate_and_normalize, run_loop_round, build_report, apply_default_position_size
+
+
+def test_apply_default_position_size_fills_missing_invest_per_trade_usd():
+    ir = {"strategy": "CUSTOM", "params": {"entry_rules": [], "exit_rules": [], "logic": "AND"}}
+    result = apply_default_position_size(ir, capital=10000)
+    assert result["params"]["invest_per_trade_usd"] > 0
+
+
+def test_apply_default_position_size_preserves_explicit_value():
+    ir = {"strategy": "RSI", "params": {"invest_per_trade_usd": 250}}
+    result = apply_default_position_size(ir, capital=10000)
+    assert result["params"]["invest_per_trade_usd"] == 250
+
+
+def test_apply_default_position_size_ignores_classic_strategies():
+    """DCA/GRID/PLA already get full sane defaults merged in at run time via
+    default_params() — this helper only needs to cover CUSTOM/indicator
+    presets, whose invest_per_trade_usd field is what reel_extractor's own
+    gap-filling prompt targets but doesn't always reliably set."""
+    ir = {"strategy": "DCA", "params": {"buy_interval_hours": 24}}
+    result = apply_default_position_size(ir, capital=10000)
+    assert "invest_per_trade_usd" not in result["params"]
 
 
 def test_validate_and_normalize_passthrough_valid_ir():
