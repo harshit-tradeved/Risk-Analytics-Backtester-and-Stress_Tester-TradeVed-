@@ -118,9 +118,27 @@ flowchart LR
     E --> F[🗣️ Plain-language verdict<br/>+ improvement agent suggestions]
 ```
 
-The IR editor in the UI lets power users inspect and tweak the extracted rules before running — so the LLM proposes, but the deterministic engine always disposes.
+The IR editor in the UI lets power users inspect and tweak the extracted rules before running — so the LLM proposes, but the deterministic engine always disposes. A deterministic **normalizer** auto-repairs known LLM output drift before validation — whole rules emitted as DSL strings (`"rsi(14) < 30"`), misnamed keys, nested operand wrappers, and mis-cased symbol/source suggestions (`BTCUSD`/`BINANCE` → `BTC/USDT`/`binance`) — all reproduced from live runs and covered by unit tests.
 
-### 4. AI Forward Test
+### 4. Unified Pipeline — one-click orchestrator (🔁 Full Pipeline tab)
+
+The newest surface: paste a transcript and the server runs the *entire* research loop as a resumable state machine, with one human checkpoint.
+
+```mermaid
+flowchart LR
+    A[📝 Transcript + optional tweak] --> B[🤖 Extract IR]
+    B --> C[🙋 Review checkpoint<br/>confirm / free-text tweak<br/>auto-proceeds in 60–100s]
+    C --> D[🔄 Optimization loop ≤5 rounds<br/>backtest → composite score → LLM critique]
+    D --> E{Plateau or cap?}
+    E -- worse round --> F[↩️ Revert to best-scoring IR]
+    E --> F
+    F --> G[🧪 Out-of-sample holdout<br/>70/30 split → stable / degraded / failed]
+    G --> H[📋 Verdict + round history<br/>paper trading kicks off in background]
+```
+
+Engineering details worth noting: runs survive backend restarts (a sweep loop detects orphaned tasks and marks them resumable); the browser survives refreshes (run id persisted client-side, polling resumes); the checkpoint is a real timer, not a modal — walk away and the pipeline proceeds with the extracted strategy; and if an LLM "improvement" round *regresses* the composite score, the pipeline reverts to the best-scoring strategy before the holdout so the final verdict always describes the best round, not the last one.
+
+### 5. AI Forward Test
 
 ```mermaid
 flowchart LR
@@ -153,7 +171,8 @@ flowchart LR
 ### AI & Forecasting
 - **Kronos** foundation-model price forecasting served from Modal with concurrent batch generation (100 paths ≈ 2 s)
 - **Crisis Sim** (stress scenarios on generated futures) and **Paper Trade** (bar-by-bar forward simulation) modes
-- Reel → Backtest pipeline with confidence scoring, honest rejection of non-testable reels, and an AI improvement agent that suggests parameter fixes for failing strategies
+- Reel → Backtest pipeline with confidence scoring, honest rejection of non-testable reels, and an AI improvement agent that **actually re-runs** the improved strategy and shows an original-vs-improved diff table audited by a judge LLM — no fabricated numbers
+- **Unified Pipeline orchestrator:** transcript → extraction → human checkpoint (60–100s auto-proceed) → ≤5-round optimize-critique loop with best-IR revert → out-of-sample holdout → verdict, resumable across backend restarts and browser refreshes
 
 ---
 
@@ -226,12 +245,13 @@ backtester/
 │   ├── validation.py       # Hold-out & walk-forward validation
 │   └── stress.py           # 17 scenario presets, MC aggregation, robustness scoring
 ├── strategies/             # GRID · DCA · PLA · 52 indicator presets · rule-builder
+├── orchestrator/           # Unified pipeline: stages, task runner, checkpoint sweep, cache
 ├── data/                   # Binance / CoinGecko / yfinance fetchers, NSE/BSE assets
-├── reel_extractor.py       # Reel transcript → strategy IR (LLM)
-├── ir_validator.py         # IR schema & sanity validation
+├── reel_extractor.py       # Reel transcript → strategy IR (LLM) + suggestion normalization
+├── ir_validator.py         # IR schema validation + deterministic LLM-drift auto-repair
 ├── improvement_agent.py    # AI strategy-improvement suggestions
 ├── ingestion.py            # Reel/video ingestion (yt-dlp, captions)
-├── test_all.py             # 37-test pytest suite
+├── test_all.py             # 44-test pytest suite (+16 normalizer/suggestion/orchestrator tests alongside)
 ├── stress_validation.py    # 207-test stress validation
 └── frontend/               # React 18 + Vite + TS + Tailwind
     └── src/components/     # Canvas MC charts, RuleBuilder, StressPage, ReelPage…
@@ -249,7 +269,8 @@ Deeper dives: [ARCHITECTURE.md](ARCHITECTURE.md) · [TECHNICAL_DOCUMENTATION.md]
 - **Performance where it matters:** the SSE endpoint offloads every blocking backtest to `asyncio.to_thread` so events flush between iterations; the MC chart is raw Canvas with incremental drawing and devicePixelRatio scaling — the previous SVG chart died at ~100 paths, this one handles 1000+; Kronos inference is batched and dispatched concurrently (100 paths ≈ 2 s).
 - **Extensibility by design:** strategies self-describe via `parameter_schema()` and the frontend renders forms from `/api/strategies` — the 52 indicator presets shipped with **zero** frontend changes.
 - **No fragile TA dependencies:** every indicator implemented from scratch in pure pandas/numpy, with SMA-seeded Wilder smoothing that matches textbook RSI/ATR/ADX values (verified in tests).
-- **Tested like a product, not a demo:** 37 unit/integration tests + a 207-combination automated stress-validation matrix that exercises every scenario × strategy × asset × severity.
+- **Tested like a product, not a demo:** 60+ unit/integration tests (core engine, IR normalizer drift cases, suggestion coercion, orchestrator loop/holdout logic) + a 207-combination automated stress-validation matrix, plus recorded live E2E passes through the real UI with real LLM and market data.
+- **LLM output treated as untrusted input:** every shape of extraction drift observed in live runs (string rules, key renames, nested operands, mis-cased symbols) gets a deterministic auto-repair with a regression test — the model proposes, the validator disposes.
 
 ---
 
