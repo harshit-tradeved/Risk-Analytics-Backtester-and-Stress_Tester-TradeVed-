@@ -329,6 +329,23 @@ class SyntheticIntradayGenerator:
 # yfinance Fetcher
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ISO fiat currency codes for forex-pair detection. A 6-letter symbol whose
+# halves are both fiat codes (AUDCAD, GBPJPY, ...) is unambiguously a forex
+# pair — Yahoo serves those as <PAIR>=X and Binance not at all. Crypto tickers
+# (BTC, ETH, SOL...) are deliberately absent so BTC/USDT-style pairs never match.
+_FIAT_CURRENCY_CODES = {
+    "USD", "EUR", "GBP", "JPY", "AUD", "NZD", "CAD", "CHF", "INR", "CNY",
+    "CNH", "SGD", "HKD", "ZAR", "MXN", "SEK", "NOK", "DKK", "TRY", "KRW",
+    "THB", "BRL", "PLN", "RUB", "AED", "SAR", "IDR", "MYR", "PHP", "TWD",
+}
+
+
+def is_forex_pair(symbol: str) -> bool:
+    """True for fiat currency pairs in either 'AUDCAD' or 'AUD/CAD' form."""
+    s = symbol.strip().upper().replace("/", "").replace("-", "")
+    return len(s) == 6 and s[:3] in _FIAT_CURRENCY_CODES and s[3:] in _FIAT_CURRENCY_CODES
+
+
 class YFinanceFetcher:
     """Fetches OHLCV data using yfinance (stocks, ETFs, BTC-USD, etc.)."""
 
@@ -406,6 +423,11 @@ class YFinanceFetcher:
         mapped = self._FOREX_COMMODITY_MAP.get(s.upper())
         if mapped:
             return mapped
+        # Any other fiat currency pair (AUDCAD, GBPJPY, ...) — found via live
+        # E2E run 2026-07-10: LLM suggested "AUDCAD", absent from the map
+        # above, so Yahoo got the raw ticker and returned no data.
+        if is_forex_pair(s):
+            return s.upper().replace("/", "").replace("-", "") + "=X"
         # Crypto pairs: 'BTC/USDT' → 'BTC-USD'
         if "/" in s:
             base, quote = s.split("/")
@@ -1013,6 +1035,11 @@ class DataFetcher:
         }
 
         order = ["binance", "yfinance"] if source == "auto" else [source]
+        if source != "auto" and source not in fetchers:
+            raise ValueError(
+                f"Unknown data source '{source}' — expected one of: "
+                f"binance, yfinance, nse, bse, auto"
+            )
 
         last_exc: Optional[Exception] = None
         for src in order:
@@ -1030,6 +1057,7 @@ class DataFetcher:
                 logger.warning("Source '%s' failed for %s: %s", src, symbol, exc)
                 last_exc = exc
 
+        detail = str(last_exc) if last_exc else "sources returned no data for this symbol/date range"
         raise ValueError(
-            f"All data sources failed for '{symbol}'. Last error: {last_exc}"
+            f"All data sources failed for '{symbol}'. Last error: {detail}"
         )
