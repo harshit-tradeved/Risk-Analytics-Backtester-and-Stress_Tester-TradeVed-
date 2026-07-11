@@ -705,16 +705,36 @@ export interface PipelineReport {
   paper_trading_result?: Record<string, unknown>;
 }
 
+export interface PipelineRoundScore {
+  round: number;
+  score: number;
+  /** Loose metrics map — includes total_return_pct, sharpe_ratio, num_trades,
+   *  max_drawdown_pct, win_rate, profit_factor, final_equity, etc.
+   *  (also carries a large equity_curve array — ignore it for display). */
+  metrics: Record<string, number>;
+}
+
+export interface PipelineHoldoutResult {
+  verdict: string;
+  mode?: string;
+  train_ratio?: number;
+  split_date?: string;
+  in_sample?: Record<string, unknown>;
+  out_of_sample?: Record<string, unknown>;
+}
+
 export interface PipelineRunState {
   id: string;
   status: PipelineStatus;
   stage: string;
   loop_round: number | null;
   symbol: string;
-  composite_scores: Array<{ round: number; score: number; metrics: Record<string, unknown> }>;
-  holdout_result: { verdict: string; in_sample: unknown; out_of_sample: unknown } | null;
+  composite_scores: PipelineRoundScore[];
+  holdout_result: PipelineHoldoutResult | null;
   report: PipelineReport | null;
   error_message: string | null;
   disclaimer: string | null;
   ir: { strategy: string; params: Record<string, unknown> } | null;
+  /** Naive-UTC ISO timestamp of when the review checkpoint opened (or null). */
+  checkpoint_opened_at: string | null;
 }

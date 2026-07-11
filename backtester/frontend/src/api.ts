@@ -787,8 +787,17 @@ export async function startPipeline(body: {
   return resp.json();
 }
 
+/** Thrown when a polled pipeline run no longer exists (stale stored run id). */
+export class PipelineRunNotFoundError extends Error {
+  constructor(runId: string) {
+    super(`Pipeline run ${runId} not found`);
+    this.name = "PipelineRunNotFoundError";
+  }
+}
+
 export async function getPipelineRun(runId: string): Promise<import("./types").PipelineRunState> {
   const resp = await fetch(`${API_BASE}/api/pipeline/${runId}`);
+  if (resp.status === 404) throw new PipelineRunNotFoundError(runId);
   if (!resp.ok) throw new Error("Failed to fetch pipeline run");
   return resp.json();
 }
