@@ -5,6 +5,8 @@ interface Props {
   symbol:   string;
   capital:  number;
   currency: string;
+  /** Close prices for the tested period — enables a real buy-and-hold comparison */
+  closePrices?: number[];
 }
 
 function fmt(n: number, dec = 0, locale = 'en-US') {
@@ -16,7 +18,7 @@ function fmtCurrency(n: number, currency: string) {
   return `${currency}${fmt(Math.abs(n), 0, locale)}`;
 }
 
-export default function PlainLanguageVerdict({ result, symbol, capital, currency }: Props) {
+export default function PlainLanguageVerdict({ result, symbol, capital, currency, closePrices }: Props) {
   const r = result.results;
   if (!r) return null;
 
@@ -28,7 +30,13 @@ export default function PlainLanguageVerdict({ result, symbol, capital, currency
   const annualReturn     = r.annualised_return_pct ?? 0;
 
   const gained = finalEquity > capital;
-  const vsLong = annualReturn > 8; // rough buy-and-hold proxy (8% annual)
+
+  // Real buy-and-hold return for the same symbol/period when price data is
+  // available; the 8%/yr proxy is only the fallback.
+  const bhPct = closePrices && closePrices.length >= 2 && closePrices[0] > 0
+    ? ((closePrices[closePrices.length - 1] / closePrices[0]) - 1) * 100
+    : null;
+  const vsLong = bhPct !== null ? returnPct > bhPct : annualReturn > 8;
 
   // Plain-language headline
   const headlineVerb = gained ? 'would have grown to' : 'would have dropped to';
@@ -89,9 +97,13 @@ export default function PlainLanguageVerdict({ result, symbol, capital, currency
 
         {/* vs buy-and-hold note */}
         <p className="text-xs text-gray-400 mt-1">
-          {vsLong
-            ? `${annualReturn.toFixed(1)}% annual return — beats a simple buy-and-hold approach.`
-            : `${annualReturn.toFixed(1)}% annual return — a simple buy-and-hold on ${symbol} may have done better.`
+          {bhPct !== null
+            ? vsLong
+              ? `Strategy returned ${returnPct >= 0 ? '+' : ''}${returnPct.toFixed(1)}% vs ${bhPct >= 0 ? '+' : ''}${bhPct.toFixed(1)}% for simply holding ${symbol} over the same period — the strategy did better.`
+              : `Strategy returned ${returnPct >= 0 ? '+' : ''}${returnPct.toFixed(1)}% vs ${bhPct >= 0 ? '+' : ''}${bhPct.toFixed(1)}% for simply holding ${symbol} over the same period — buy-and-hold would have done better.`
+            : vsLong
+              ? `${annualReturn.toFixed(1)}% annual return — beats a simple buy-and-hold approach.`
+              : `${annualReturn.toFixed(1)}% annual return — a simple buy-and-hold on ${symbol} may have done better.`
           }
         </p>
 

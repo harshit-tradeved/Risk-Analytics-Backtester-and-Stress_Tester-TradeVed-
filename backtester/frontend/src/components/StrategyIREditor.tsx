@@ -67,7 +67,9 @@ export default function StrategyIREditor({ ir, gaps, onChange, onConfirm, loadin
 
   const hasGaps       = gaps.length > 0;
   const hasErrors     = rawError.length > 0;
-  const hasServerErrs = serverErrors.length > 0 && !showRaw;
+  // Server-reported errors gate the run button in BOTH views — the parent
+  // clears them when the user applies an edited IR, so they're never stale.
+  const hasServerErrs = serverErrors.length > 0;
 
   function applyRaw() {
     try {

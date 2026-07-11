@@ -126,6 +126,7 @@ export default function ReelPage() {
   const [stage,      setStage]      = useState<AnalysisStage>('idle');
   const [analysis,   setAnalysis]   = useState<ReelAnalysisResponse | null>(null);
   const [ir,         setIR]         = useState<StrategyIR | null>(null);
+  const [irErrors,   setIrErrors]   = useState<string[]>([]);
   const [btResult,   setBtResult]   = useState<BacktestResponse | null>(null);
   const [errorMsg,   setErrorMsg]   = useState('');
   const [btError,    setBtError]    = useState('');
@@ -157,6 +158,7 @@ export default function ReelPage() {
           ...(res.suggested_interval ? { interval: res.suggested_interval } : {}),
         }));
       }
+      setIrErrors(res.ir_errors ?? []);
       if (res.strategy_ir) {
         setIR(res.strategy_ir);
         setStage('review');
@@ -341,10 +343,10 @@ export default function ReelPage() {
                   <StrategyIREditor
                     ir={ir!}
                     gaps={analysis.gaps}
-                    onChange={setIR}
+                    onChange={updated => { setIR(updated); setIrErrors([]); }}
                     onConfirm={handleRunBacktest}
                     loading={false}
-                    serverErrors={analysis.ir_errors ?? []}
+                    serverErrors={irErrors}
                   />
                 </div>
                 <ConfigForm config={config} onChange={setConfig} />
@@ -379,6 +381,7 @@ export default function ReelPage() {
               symbol={config.symbol}
               capital={config.capital}
               currency={currency}
+              closePrices={btResult.series?.close_prices}
             />
 
             <MetricsGrid
