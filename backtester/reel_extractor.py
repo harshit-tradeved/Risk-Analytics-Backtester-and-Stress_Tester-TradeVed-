@@ -753,3 +753,46 @@ def extract_strategy_ir(transcript: str, caption: str = "") -> dict[str, Any]:
         "suggested_source":   result.get("suggested_source"),
         "suggested_interval": result.get("suggested_interval"),
     }
+
+
+# ── Suggestion normalization ─────────────────────────────────────────────────
+# The LLM sometimes emits suggested_symbol/source/interval in the "wrong
+# casing/format" (live E2E, 2026-07-10: symbol="BTCUSD", source="BINANCE").
+# The frontend applies these raw — its source <select> expects lowercase
+# values and the Binance fetcher expects "BASE/QUOTE" — so normalize here.
+# Unknown values become None so the frontend keeps its current selection.
+
+_SOURCE_ALIASES = {
+    "binance": "binance",
+    "yfinance": "yfinance", "yahoo": "yfinance", "yahoo finance": "yfinance",
+    "nse": "nse", "bse": "bse",
+}
+_VALID_INTERVALS = {"1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w"}
+_BINANCE_QUOTES = ("USDT", "USDC", "BUSD", "BTC", "ETH")
+
+
+def normalize_suggestions(symbol: Any, source: Any, interval: Any) -> tuple:
+    """Return (symbol, source, interval) coerced to the exact values the
+    frontend selects and the data fetchers accept."""
+    src = _SOURCE_ALIASES.get(str(source).strip().lower()) if source else None
+
+    sym = str(symbol).strip().upper() if symbol else None
+    if sym:
+        if src == "binance" and "/" not in sym:
+            # "BTCUSD" → "BTC/USDT": Binance spot has no plain-USD pairs, so a
+            # trailing USD means the USDT pair; then slash off a known quote.
+            if sym.endswith("USD") and not sym.endswith("BUSD"):
+                sym = sym[:-3] + "USDT"
+            for quote in _BINANCE_QUOTES:
+                if sym.endswith(quote) and len(sym) > len(quote):
+                    sym = f"{sym[:-len(quote)]}/{quote}"
+                    break
+        elif src in ("nse", "bse"):
+            # Strip exchange suffixes like ".NS"/".BO" — fetcher adds its own.
+            sym = sym.split(".")[0]
+
+    itv = str(interval).strip().lower() if interval else None
+    if itv not in _VALID_INTERVALS:
+        itv = None
+
+    return sym, src, itv

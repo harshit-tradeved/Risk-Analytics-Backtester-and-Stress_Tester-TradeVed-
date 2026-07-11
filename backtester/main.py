@@ -1394,6 +1394,17 @@ async def analyze_reel(req: ReelAnalyzeRequest):
     else:
         ir_errors = ["Extraction did not produce a valid IR"]
 
+    # The frontend applies these raw (source <select> expects lowercase, the
+    # Binance fetcher expects "BASE/QUOTE") — normalize LLM casing/format
+    # drift like "BINANCE"/"BTCUSD"; unknown values become None so the
+    # frontend keeps its current selection.
+    from reel_extractor import normalize_suggestions
+    sugg_symbol, sugg_source, sugg_interval = normalize_suggestions(
+        extraction.get("suggested_symbol"),
+        extraction.get("suggested_source"),
+        extraction.get("suggested_interval"),
+    )
+
     return _sanitize({
         "triage":              triage_result,
         "transcript":          transcript,
@@ -1402,9 +1413,9 @@ async def analyze_reel(req: ReelAnalyzeRequest):
         "confidence":          extraction.get("confidence", 0.0),
         "ir_errors":           ir_errors,
         "cleaned":             extraction.get("cleaned"),
-        "suggested_symbol":    extraction.get("suggested_symbol"),
-        "suggested_source":    extraction.get("suggested_source"),
-        "suggested_interval":  extraction.get("suggested_interval"),
+        "suggested_symbol":    sugg_symbol,
+        "suggested_source":    sugg_source,
+        "suggested_interval":  sugg_interval,
         **({"error": extraction["error"]} if extraction.get("error") else {}),
     })
 
@@ -2860,6 +2871,9 @@ def pipeline_get(run_id: str, db: Session = Depends(get_db)):
         "error_message": row.error_message,
         "disclaimer": row.disclaimer,
         "ir": json.loads(row.ir_json) if row.ir_json else None,
+        # Stored via datetime.utcnow() (naive UTC) — clients must treat this
+        # ISO string as UTC when computing elapsed time.
+        "checkpoint_opened_at": row.checkpoint_opened_at.isoformat() if row.checkpoint_opened_at else None,
     }
 
 
