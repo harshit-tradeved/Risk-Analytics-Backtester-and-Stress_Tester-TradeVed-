@@ -49,6 +49,65 @@ def test_resolve_run_target_falls_back_to_hardcoded_defaults_when_nothing_sugges
     assert (symbol, source, interval) == ("BTC/USDT", "binance", "1d")
 
 
+def test_resolve_run_target_sanitizes_llm_suggested_source_casing():
+    """Regression test: live E2E run on a forex YouTube video (2026-07-10) —
+    the extraction LLM suggested source "BINANCE" (uppercase). The fetcher's
+    source registry is lowercase-keyed, so fetchers.get("BINANCE") returned
+    None for every source and the run failed with the baffling
+    'All data sources failed ... Last error: None'."""
+    symbol, source, interval = resolve_run_target(
+        None, None, None,
+        {"suggested_symbol": "SOL/USDT", "suggested_source": "BINANCE", "suggested_interval": "1H"},
+    )
+    assert source == "binance"
+    assert interval == "1h"
+
+
+def test_resolve_run_target_maps_unknown_source_to_auto():
+    """A suggested source outside {binance,yfinance,nse,bse,auto} (e.g.
+    "forex", "oanda") must degrade to "auto" (binance→yfinance chain), never
+    reach the fetcher verbatim."""
+    _, source, _ = resolve_run_target(
+        None, None, None,
+        {"suggested_symbol": "SPY", "suggested_source": "alpaca", "suggested_interval": "1h"},
+    )
+    assert source == "auto"
+
+
+def test_resolve_run_target_routes_forex_pairs_to_yfinance():
+    """Same live run: symbol AUDCAD with source binance can never succeed —
+    Binance has no fiat forex pairs. Currency-pair symbols must route to
+    yfinance (which serves them as AUDCAD=X) regardless of the suggested
+    source."""
+    symbol, source, _ = resolve_run_target(
+        None, None, None,
+        {"suggested_symbol": "AUDCAD", "suggested_source": "BINANCE", "suggested_interval": "1h"},
+    )
+    assert symbol == "AUDCAD"
+    assert source == "yfinance"
+
+
+def test_fetch_with_source_fallback_retries_on_auto(monkeypatch):
+    """If the resolved source fails outright, retry once with source='auto'
+    (binance→yfinance chain) before failing the whole run."""
+    import orchestrator.stages as stages
+    from datetime import date
+
+    calls = []
+
+    def fake_fetch(symbol, source, interval, start, end):
+        calls.append(source)
+        if source == "binance":
+            raise ValueError("All data sources failed for 'AUDCAD'. Last error: None")
+        return pd.DataFrame({"close": [1.0]})
+
+    monkeypatch.setattr(stages, "fetch_and_validate_data", fake_fetch)
+    df, used = stages.fetch_with_source_fallback("AUDCAD", "binance", "1h", date(2024, 1, 1), date(2025, 1, 1))
+    assert calls == ["binance", "auto"]
+    assert used == "auto"
+    assert not df.empty
+
+
 def test_validate_and_repair_passes_through_when_already_valid():
     ir = {"strategy": "DCA", "params": {"buy_interval_hours": 24, "invest_per_buy_usd": 100}}
     normalized, errors = validate_and_repair(ir)

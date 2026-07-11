@@ -15,7 +15,7 @@ from typing import Any, Optional
 
 import pandas as pd
 
-from data.fetcher import DataFetcher
+from data.fetcher import DataFetcher, is_forex_pair
 from data.validator import DataValidator
 from engine.metrics import score_backtest
 from engine.validation import run_segment_backtest, run_holdout, run_walk_forward
@@ -26,6 +26,10 @@ logger = logging.getLogger(__name__)
 
 _fetcher = DataFetcher()
 _validator = DataValidator()
+
+# The DataFetcher's actual source registry — anything else an LLM suggests
+# (arbitrary casing, "forex", "oanda", ...) must be sanitized before use.
+_ALLOWED_SOURCES = {"binance", "yfinance", "nse", "bse", "auto"}
 
 
 def fetch_and_validate_data(
@@ -126,10 +130,40 @@ def resolve_run_target(
     only falls back to the hardcoded defaults if extraction suggested
     nothing either.
     """
-    resolved_symbol = symbol or extraction.get("suggested_symbol") or "BTC/USDT"
-    resolved_source = source or extraction.get("suggested_source") or "binance"
-    resolved_interval = interval or extraction.get("suggested_interval") or "1d"
+    resolved_symbol = str(symbol or extraction.get("suggested_symbol") or "BTC/USDT").strip()
+    resolved_source = str(source or extraction.get("suggested_source") or "binance").strip().lower()
+    resolved_interval = str(interval or extraction.get("suggested_interval") or "1d").strip().lower()
+
+    # LLM-suggested sources arrive in arbitrary casing ("BINANCE") or as
+    # names that aren't fetchers at all ("forex", "oanda") — found via live
+    # E2E run 2026-07-10, where fetchers.get("BINANCE") returned None for
+    # every source and the run died with 'Last error: None'. Unknown sources
+    # degrade to "auto" (binance→yfinance chain) instead of failing.
+    if resolved_source not in _ALLOWED_SOURCES:
+        resolved_source = "auto"
+    # Fiat forex pairs (AUDCAD, GBPJPY, ...) only exist on yfinance — Binance
+    # has no fiat-fiat markets, so honoring a suggested "binance" would
+    # guarantee a fetch failure.
+    if is_forex_pair(resolved_symbol):
+        resolved_source = "yfinance"
     return resolved_symbol, resolved_source, resolved_interval
+
+
+def fetch_with_source_fallback(
+    symbol: str, source: str, interval: str, start_date: date, end_date: date,
+) -> tuple[pd.DataFrame, str]:
+    """
+    fetch_and_validate_data with one safety net: if the resolved source
+    fails outright (LLM suggested a source that doesn't carry the symbol),
+    retry once with source='auto' (binance→yfinance chain) before letting
+    the run fail. Returns (df, source_actually_used).
+    """
+    try:
+        return fetch_and_validate_data(symbol, source, interval, start_date, end_date), source
+    except Exception:
+        if source == "auto":
+            raise
+        return fetch_and_validate_data(symbol, "auto", interval, start_date, end_date), "auto"
 
 
 def patch_ir_with_tweak(ir: dict[str, Any], tweak: str, symbol: str, interval: str) -> dict[str, Any]:
@@ -195,7 +229,11 @@ def build_report(run: dict[str, Any]) -> dict[str, Any]:
     """
     scores = json.loads(run.get("composite_scores_json") or "[]")
     holdout = json.loads(run.get("holdout_result_json") or "null")
-    last_score = scores[-1]["score"] if scores else None
+    # The pipeline reverts to the best-scoring IR after the loop (a later
+    # "improved" round can score worse), so the report must describe the
+    # BEST round's score, not blindly scores[-1]. The raw scores list is
+    # left untouched so the UI can still show the full round history.
+    last_score = max((s["score"] for s in scores), default=None) if scores else None
     verdict = "No rounds completed yet."
     if holdout:
         v = holdout.get("verdict", "unknown")
