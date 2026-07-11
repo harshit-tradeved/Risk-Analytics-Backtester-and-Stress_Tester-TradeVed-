@@ -10,6 +10,8 @@ Exported:
 """
 from __future__ import annotations
 
+import json
+import re
 from typing import Any
 
 from engine.indicators import CATALOG_BY_KEY
@@ -26,10 +28,66 @@ _PRICE_COLS = {"open", "high", "low", "close", "volume"}
 # rather than genuine ambiguity, so it's safe to auto-correct instead of
 # hard-failing validation.
 
+# "donchian(20)" / "supertrend(10, 3)" — call-style indicator shorthand.
+_CALL_STYLE_RE = re.compile(r"^([A-Za-z_]\w*)\s*(?:\(([^)]*)\))?$")
+
+# "rsi(14) < 30" — a whole rule expressed as a single DSL string (live
+# /api/reel/analyze run, 2026-07-10: entry_rules=["rsi(14) < 30"],
+# exit_rules=["rsi(14) cross_above 70"]). Split on exactly one comparison
+# operator; word variants ("crosses above") are canonicalised first.
+_DSL_OP_RE = re.compile(r"\s*(cross_above|cross_below|>=|<=|==|>|<)\s*", re.IGNORECASE)
+_CROSS_ABOVE_RE = re.compile(r"cross(?:es)?[\s_]+above", re.IGNORECASE)
+_CROSS_BELOW_RE = re.compile(r"cross(?:es)?[\s_]+below", re.IGNORECASE)
+
+
+def _coerce_number(text: str) -> Any:
+    try:
+        f = float(text)
+    except (TypeError, ValueError):
+        return text
+    return int(f) if f.is_integer() else f
+
+
 def _normalize_operand(operand: Any) -> Any:
     # Bare numeric literal instead of {"value": N}
     if isinstance(operand, (int, float)):
         return {"value": float(operand)}
+    # Bare string shorthand — found via live E2E run on a real Instagram reel
+    # (2026-07-10): {"left": "close", "op": "cross_above", "right":
+    # "donchian(20)", "right_output": "dc_upper"}. Price columns, numeric
+    # literals, and call-style indicator params are all mechanical renames.
+    if isinstance(operand, str):
+        s = operand.strip()
+        if s.lower() in _PRICE_COLS:
+            return {"price": s.lower()}
+        num = _coerce_number(s)
+        if not isinstance(num, str):
+            return {"value": float(num)}
+        if s.lower() == "price":
+            # Bare "price" — unqualified price reference means the close.
+            return {"price": "close"}
+        m = _CALL_STYLE_RE.match(s)
+        if m:
+            tok = m.group(1).lower()
+            key = tok if tok in CATALOG_BY_KEY else None
+            output = None
+            if key is None:
+                # Output-series shorthand, e.g. "macd_signal" / "dc_upper(20)"
+                # — resolve to the owning indicator only if the output name is
+                # unique across the catalog (it currently always is).
+                owners = [k for k, e in CATALOG_BY_KEY.items() if tok in e["outputs"]]
+                if len(owners) == 1:
+                    key, output = owners[0], tok
+            if key is not None:
+                out: dict[str, Any] = {"indicator": key}
+                args = [a.strip() for a in (m.group(2) or "").split(",") if a.strip()]
+                if args:
+                    names = [p["name"] for p in CATALOG_BY_KEY[key]["params"]]
+                    out["params"] = {name: _coerce_number(arg) for name, arg in zip(names, args)}
+                if output:
+                    out["output"] = output
+                return out
+        return operand
     if not isinstance(operand, dict):
         return operand
     # {"type": "price", "source"/"field": "close"} — a verbose wrapper style
@@ -59,16 +117,54 @@ def _normalize_operand(operand: Any) -> Any:
     return operand
 
 
+def _parse_dsl_rule(text: str) -> Any:
+    """
+    Deterministically parse a whole-rule DSL string like "rsi(14) < 30" or
+    "close > sma(50)" into the structured {left, operator, right} dict that
+    CustomStrategy expects. Only converts when the parse is unambiguous —
+    exactly one operator, and both operands resolve to a known indicator,
+    price column, or numeric literal. Anything else is returned unchanged so
+    validate_ir reports it (as today).
+    """
+    s = _CROSS_ABOVE_RE.sub("cross_above", text)
+    s = _CROSS_BELOW_RE.sub("cross_below", s)
+    parts = _DSL_OP_RE.split(s.strip())
+    if len(parts) != 3 or not parts[0].strip() or not parts[2].strip():
+        return text
+    left  = _normalize_operand(parts[0].strip())
+    right = _normalize_operand(parts[2].strip())
+    if isinstance(left, str) or isinstance(right, str):
+        return text  # an operand didn't resolve — leave for validate_ir
+    return {"left": left, "operator": parts[1].lower(), "right": right}
+
+
 def _normalize_rule(rule: Any) -> Any:
+    # Whole rule double-encoded as a JSON string — decode and normalize.
+    if isinstance(rule, str):
+        try:
+            decoded = json.loads(rule)
+        except (TypeError, ValueError):
+            # Not JSON — try the "rsi(14) < 30" DSL-expression form instead.
+            return _parse_dsl_rule(rule)
+        if isinstance(decoded, dict):
+            return _normalize_rule(decoded)
+        return rule
     if not isinstance(rule, dict):
         return rule
     # "op" used instead of "operator" — another observed key-name variant.
     if "operator" not in rule and "op" in rule:
         rule["operator"] = rule.pop("op")
-    if "left" in rule:
-        rule["left"] = _normalize_operand(rule["left"])
-    if "right" in rule:
-        rule["right"] = _normalize_operand(rule["right"])
+    for side in ("left", "right"):
+        if side in rule:
+            rule[side] = _normalize_operand(rule[side])
+        # "left_output"/"right_output" sibling keys instead of "output" inside
+        # the operand — same live-run drift as the string shorthand above.
+        out_key = f"{side}_output"
+        if out_key in rule:
+            out_val = rule.pop(out_key)
+            operand = rule.get(side)
+            if isinstance(operand, dict) and "indicator" in operand and "output" not in operand and out_val:
+                operand["output"] = out_val
     return rule
 
 
