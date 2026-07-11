@@ -199,6 +199,79 @@ def test_run_pipeline_uses_fallback_suggestion_instead_of_dead_ending_on_extract
         _cleanup(run_id)
 
 
+def test_run_loop_and_beyond_reverts_to_best_ir_when_improved_round_scores_worse(monkeypatch):
+    """
+    Regression test (live run 3498ef3d): the loop replaces `ir` with the
+    critique's improved IR at the END of each iteration, BEFORE the next
+    round scores it. When the improved IR scores WORSE (round 1: 0.5583,
+    round 2: 0.5062), the plateau check breaks the loop but `ir` still
+    holds the worse round-2 IR — so holdout, paper trading, and the report
+    all ran on an IR inferior to round 1's. The fix tracks the best-scoring
+    (score, ir) pair and reverts to it after the loop; build_report must
+    also surface the BEST score, not blindly scores[-1].
+    """
+    init_db()
+    db = SessionLocal()
+    run_id = str(uuid.uuid4())
+    round1_ir = {"strategy": "DCA", "params": {"buy_interval_hours": 24, "invest_per_buy_usd": 100}}
+    round2_ir = {"strategy": "DCA", "params": {"buy_interval_hours": 24, "invest_per_buy_usd": 250}}
+    db.add(models.PipelineRun(
+        id=run_id, user_id="best@example.com", status="looping", stage="loop_round_1",
+        ir_json=json.dumps(round1_ir),
+        symbol="BTC/USDT", timeframe="1d", capital=10000.0,
+        loop_round=0, composite_scores_json=json.dumps([]),
+    ))
+    db.commit()
+    db.close()
+
+    round_irs = []
+    round_scores = [0.5583, 0.5062]  # round 2 (the "improved" IR) scores worse
+
+    def fake_run_loop_round(df, ir, capital, sim_kwargs, symbol, interval):
+        round_irs.append(json.loads(json.dumps(ir)))
+        return {"score": round_scores[len(round_irs) - 1], "metrics": {"num_trades": 1}}
+
+    holdout_irs = []
+
+    def fake_run_holdout_check(df, ir, capital, sim_kwargs):
+        holdout_irs.append(json.loads(json.dumps(ir)))
+        return {"verdict": "stable"}
+
+    async def fake_paper_trading(*a, **k):
+        return None
+
+    monkeypatch.setattr(pipeline, "fetch_with_source_fallback", lambda *a, **k: (_synthetic_df(), "binance"))
+    monkeypatch.setattr(pipeline, "run_loop_round", fake_run_loop_round)
+    monkeypatch.setattr(pipeline, "run_holdout_check", fake_run_holdout_check)
+    monkeypatch.setattr(pipeline, "critique_and_improve", lambda *a, **k: {"improved_ir": round2_ir})
+    monkeypatch.setattr(pipeline, "validate_and_normalize", lambda ir: (ir, []))
+    monkeypatch.setattr(pipeline, "_run_paper_trading", fake_paper_trading)
+
+    try:
+        asyncio.run(pipeline._run_loop_and_beyond(run_id))
+
+        # Both rounds ran: round 1 on the original IR, round 2 on the improved one.
+        assert len(round_irs) == 2
+        assert round_irs[0] == round1_ir
+        assert round_irs[1] == round2_ir
+
+        # Holdout must have used the round-1 (best-scoring) IR, not round 2's.
+        assert holdout_irs == [round1_ir]
+
+        db = SessionLocal()
+        row = db.query(models.PipelineRun).filter_by(id=run_id).first()
+        # Persisted IR reverted to the best-scoring one.
+        assert json.loads(row.ir_json) == round1_ir
+        # Report surfaces the BEST score, and the raw round history is untouched.
+        report = json.loads(row.report_json)
+        assert report["last_score"] == pytest.approx(0.5583)
+        scores = json.loads(row.composite_scores_json)
+        assert [s["score"] for s in scores] == round_scores
+        db.close()
+    finally:
+        _cleanup(run_id)
+
+
 def test_sweep_once_marks_orphaned_running_rows_interrupted():
     init_db()
     db = SessionLocal()

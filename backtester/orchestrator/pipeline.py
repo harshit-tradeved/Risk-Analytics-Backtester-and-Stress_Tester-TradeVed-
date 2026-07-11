@@ -25,6 +25,7 @@ from orchestrator.stages import (
     fetch_and_validate_data, extract_ir, validate_and_normalize, validate_and_repair,
     patch_ir_with_tweak, run_loop_round, run_holdout_check, build_report,
     apply_default_position_size, resolve_run_target, build_fallback_suggestion,
+    fetch_with_source_fallback,
 )
 
 logger = logging.getLogger(__name__)
@@ -205,13 +206,27 @@ async def _run_loop_and_beyond(run_id: str) -> None:
     try:
         row = db.query(models.PipelineRun).filter_by(id=run_id).first()
         ir = json.loads(row.ir_json)
-        df = await asyncio.to_thread(
-            fetch_and_validate_data, row.symbol, row.source or "binance", row.timeframe,
+        df, used_source = await asyncio.to_thread(
+            fetch_with_source_fallback, row.symbol, row.source or "binance", row.timeframe,
             date.today() - timedelta(days=LOOKBACK_DAYS), date.today(),
         )
+        if used_source != row.source:
+            _save(db, row, source=used_source)
         sim_kwargs = {"symbol": row.symbol}
         capital = row.capital or DEFAULT_CAPITAL
         scores: list[dict] = json.loads(row.composite_scores_json or "[]")
+
+        # Track the best-scoring (score, ir) pair across rounds. `ir` is
+        # reassigned to the critique's improved IR at the END of each
+        # iteration, so the IR that actually *ran* in round N (producing
+        # scores[N-1]) must be snapshotted here, before the critique swaps
+        # it out. Without this, a plateau break after a WORSE round leaves
+        # `ir` holding the inferior improved IR, and holdout/paper-trading/
+        # report all run on it (observed in live run 3498ef3d: round 1
+        # scored 0.5583, round 2's "improved" IR scored 0.5062, and the
+        # final report described the round-2 strategy).
+        best_score: Optional[float] = None
+        best_ir: Optional[dict] = None
 
         for round_num in range(1, LOOP_ROUND_CAP + 1):
             _save(db, row, loop_round=round_num, stage=f"loop_round_{round_num}")
@@ -219,6 +234,10 @@ async def _run_loop_and_beyond(run_id: str) -> None:
             score = round_result["score"]
             scores.append({"round": round_num, "score": score, "metrics": round_result["metrics"]})
             _save(db, row, composite_scores_json=json.dumps(scores))
+
+            if best_score is None or score > best_score:
+                best_score = score
+                best_ir = ir  # the IR that produced this score
 
             if round_num >= 2 and (score - scores[-2]["score"]) < PLATEAU_THRESHOLD:
                 break
@@ -235,6 +254,13 @@ async def _run_loop_and_beyond(run_id: str) -> None:
             if errors:
                 break
             ir = normalized
+            _save(db, row, ir_json=json.dumps(ir))
+
+        # Revert to the best-scoring IR if the loop exited holding a worse
+        # one, so holdout, paper trading, and the report all describe the
+        # strategy that actually scored best.
+        if best_ir is not None and ir != best_ir:
+            ir = best_ir
             _save(db, row, ir_json=json.dumps(ir))
 
         # ── Holdout (touched exactly once) ──
