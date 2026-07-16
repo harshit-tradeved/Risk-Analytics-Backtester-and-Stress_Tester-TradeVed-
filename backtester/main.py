@@ -38,28 +38,28 @@ from config import (
     RATE_LIMIT_PER_MINUTE, REPORTS_DIR,
 )
 from database import get_db, init_db
-from data.fetcher import DataFetcher
-from data.validator import DataValidator
-from data.eda import EDAEngine
-from data.indian_assets import (
+from backtesting.data.fetcher import DataFetcher
+from backtesting.data.validator import DataValidator
+from backtesting.data.eda import EDAEngine
+from backtesting.data.indian_assets import (
     to_yf_symbol as indian_to_yf,
     NSE_DROPDOWN, NSE_ETFS, FO_LOT_SIZES, INDEX_MAP,
     is_indian, get_lot_size,
 )
-from engine.simulator import TradeSimulator
-from engine.metrics import calculate_metrics
-from engine.cost_models import IndianCostModel
-from engine.regimes import classify_regimes, regime_breakdown
-from engine.validation import run_holdout, run_walk_forward
-from engine.stress import (
+from backtesting.engine.simulator import TradeSimulator
+from backtesting.engine.metrics import calculate_metrics
+from backtesting.engine.cost_models import IndianCostModel
+from backtesting.engine.regimes import classify_regimes, regime_breakdown
+from backtesting.engine.validation import run_holdout, run_walk_forward
+from stress_testing.stress import (
     SCENARIO_PRESETS, StressScenario, run_stress_backtest,
     apply_stress, run_single_backtest, aggregate_stress_results, run_trade_mc,
     compute_wfe, compute_robustness_score, _compute_regime_vol_scales,
 )
-from engine.regimes import classify_regimes
-from frontend.report import generate_report
-from strategies import STRATEGY_REGISTRY
-from orchestrator import pipeline as pipeline_orchestrator
+from backtesting.engine.regimes import classify_regimes
+from backtesting.reporting.report import generate_report
+from backtesting.strategies import STRATEGY_REGISTRY
+from reel_to_pipeline import pipeline as pipeline_orchestrator
 
 logger = logging.getLogger(__name__)
 
@@ -443,7 +443,7 @@ def list_indicators():
     documents the indicator library). Each entry has: key, label, group,
     params (with default/min/max/step), and outputs (stable column names).
     """
-    from engine.indicators import INDICATOR_CATALOG, GROUPS, TOTAL_OUTPUT_SERIES
+    from backtesting.engine.indicators import INDICATOR_CATALOG, GROUPS, TOTAL_OUTPUT_SERIES
     return {
         "groups": list(GROUPS),
         "count": len(INDICATOR_CATALOG),
@@ -1276,7 +1276,7 @@ def backtest_from_ir(req: FromIRRequest, db: Session = Depends(get_db)):
     Compile a Strategy IR (from reel extraction or manual entry) into a full backtest.
     Validates the IR then delegates to the standard backtest engine.
     """
-    from ir_validator import validate_ir, normalize_ir
+    from reel_to_backtest.ir_validator import validate_ir, normalize_ir
     ir = normalize_ir(req.strategy_ir)
     errors = validate_ir(ir)
     if errors:
@@ -1320,8 +1320,8 @@ async def analyze_reel(req: ReelAnalyzeRequest):
 
     Returns triage result + Strategy IR + gaps for user review before running a backtest.
     """
-    from reel_extractor import triage, extract_strategy_ir
-    from ir_validator import validate_ir
+    from reel_to_backtest.reel_extractor import triage, extract_strategy_ir
+    from reel_to_backtest.ir_validator import validate_ir
     from config import INGESTION_API_URL
 
     transcript = (req.transcript or "").strip()
@@ -1349,7 +1349,7 @@ async def analyze_reel(req: ReelAnalyzeRequest):
         else:
             # Local ingestion — yt-dlp + ffmpeg + Groq Whisper (ingestion.py)
             try:
-                from ingestion import handle_url as _ingest_url
+                from reel_to_backtest.ingestion import handle_url as _ingest_url
                 data = await asyncio.wait_for(
                     asyncio.to_thread(_ingest_url, req.url), timeout=INGESTION_TIMEOUT_SECS,
                 )
@@ -1394,7 +1394,7 @@ async def analyze_reel(req: ReelAnalyzeRequest):
     # Stage 1+2 — extract Strategy IR
     extraction = await asyncio.to_thread(extract_strategy_ir, transcript, caption)
 
-    from ir_validator import normalize_ir
+    from reel_to_backtest.ir_validator import normalize_ir
     strategy_ir = extraction.get("strategy_ir")
     if isinstance(strategy_ir, dict):
         strategy_ir = normalize_ir(strategy_ir)
@@ -1406,7 +1406,7 @@ async def analyze_reel(req: ReelAnalyzeRequest):
     # Binance fetcher expects "BASE/QUOTE") — normalize LLM casing/format
     # drift like "BINANCE"/"BTCUSD"; unknown values become None so the
     # frontend keeps its current selection.
-    from reel_extractor import normalize_suggestions
+    from reel_to_backtest.reel_extractor import normalize_suggestions
     sugg_symbol, sugg_source, sugg_interval = normalize_suggestions(
         extraction.get("suggested_symbol"),
         extraction.get("suggested_source"),
@@ -1466,8 +1466,8 @@ def improve_reel_strategy(req: ImproveRequest, db: Session = Depends(get_db)):
     4. An independent Judge LLM audits the full trace for honesty,
        consistency, and overfitting risk before the result is returned.
     """
-    from ir_validator import validate_ir, normalize_ir
-    from improvement_agent import critique_and_improve, repair_improved_ir, compute_diff, judge_pipeline
+    from reel_to_backtest.ir_validator import validate_ir, normalize_ir
+    from reel_to_backtest.improvement_agent import critique_and_improve, repair_improved_ir, compute_diff, judge_pipeline
 
     original_ir = req.strategy_ir
 
@@ -2062,7 +2062,7 @@ def _build_forecast_sim_kwargs(req: ForecastRequest, lot_sz: int, use_indian: bo
 
 def _prepare_forecast(req: ForecastRequest):
     """Shared setup: fetch OHLCV, build strategy, build sim_kwargs."""
-    from engine.stress import StressScenario
+    from stress_testing.stress import StressScenario
     if req.strategy.upper() not in STRATEGY_REGISTRY:
         raise HTTPException(400, f"Unknown strategy '{req.strategy}'")
 
@@ -2119,7 +2119,7 @@ def run_forecast(req: ForecastRequest):
 
     Response shape is identical to /stress/run — frontend reuses StressResults.
     """
-    from engine.forecast import generate_paths as _gen_paths
+    from forward_testing.forecast import generate_paths as _gen_paths
 
     df, strategy_cls, strategy_params, sim_kwargs, dummy_scenario = _prepare_forecast(req)
 
@@ -2203,7 +2203,7 @@ async def stream_forecast_sse(req: ForecastRequest):
                    if k not in ("equity_curve", "drawdowns", "timestamps", "trades")}
         yield _ev({"type": "baseline", "metrics": safe_bl, "total": n_paths_})
 
-        from engine.forecast import generate_paths as _gen_paths
+        from forward_testing.forecast import generate_paths as _gen_paths
         from collections import Counter
 
         per_run:       list[dict]         = []
@@ -2219,7 +2219,7 @@ async def stream_forecast_sse(req: ForecastRequest):
             _kurl = os.getenv("KRONOS_URL")
             logger.info("forward/stream: generating %d paths  kurl=%s", n_paths_, bool(_kurl))
             if _kurl:
-                from engine.forecast import KronosClient as _KC
+                from forward_testing.forecast import KronosClient as _KC
                 _client = _KC(_kurl)
                 _BATCH  = 10
                 _specs  = [
@@ -2235,7 +2235,7 @@ async def stream_forecast_sse(req: ForecastRequest):
                 all_paths: list = [p for batch in _batches for p in batch]
                 logger.info("forward/stream: all %d paths received", len(all_paths))
             else:
-                from engine.forecast import _block_bootstrap_paths as _bbp
+                from forward_testing.forecast import _block_bootstrap_paths as _bbp
                 all_paths = await asyncio.to_thread(
                     _bbp, df_snap, n_paths_, horizon_, 20, req_snap.seed,
                 )
@@ -2412,7 +2412,7 @@ async def stream_crisis_sse(req: CrisisRequest):
                    if k not in ("equity_curve", "drawdowns", "timestamps", "trades")}
         yield _ev({"type": "baseline", "metrics": safe_bl, "total": n_paths_})
 
-        from engine.forecast import generate_paths as _gen_paths
+        from forward_testing.forecast import generate_paths as _gen_paths
         from collections import Counter
 
         per_run:       list[dict]        = []
@@ -2426,7 +2426,7 @@ async def stream_crisis_sse(req: CrisisRequest):
         try:
             _kurl = os.getenv("KRONOS_URL")
             if _kurl:
-                from engine.forecast import KronosClient as _KC
+                from forward_testing.forecast import KronosClient as _KC
                 _client = _KC(_kurl)
                 _BATCH  = 10
                 _specs  = [
@@ -2440,7 +2440,7 @@ async def stream_crisis_sse(req: CrisisRequest):
                 ])
                 all_raw_paths: list = [p for batch in _batches for p in batch]
             else:
-                from engine.forecast import _block_bootstrap_paths as _bbp
+                from forward_testing.forecast import _block_bootstrap_paths as _bbp
                 all_raw_paths = await asyncio.to_thread(
                     _bbp, df_snap, n_paths_, horizon_, 20, req_snap.seed,
                 )
@@ -2562,7 +2562,7 @@ async def compare_forecast_methods(req: ForecastRequest):
     Response: { kronos_available, bootstrap: summary, kronos: summary|null,
                 regime_forecast: {bull%, bear%, sideways%} }
     """
-    from engine.forecast import (
+    from forward_testing.forecast import (
         _block_bootstrap_paths,
         generate_one_path as _gen_one_path,
         KRONOS_URL as _KURL,
@@ -2703,7 +2703,7 @@ async def stream_paper_trade(req: PaperRequest):
         })
 
         try:
-            from engine.forecast import generate_one_path as _gen_one_path
+            from forward_testing.forecast import generate_one_path as _gen_one_path
             path_df = await asyncio.to_thread(
                 _gen_one_path, df_snap, horizon_, 20, req_snap.seed,
             )
@@ -2840,7 +2840,7 @@ async def pipeline_start(req: PipelineStartRequest):
         else:
             # Local ingestion — yt-dlp + ffmpeg + Groq Whisper (ingestion.py)
             try:
-                from ingestion import handle_url as _ingest_url
+                from reel_to_backtest.ingestion import handle_url as _ingest_url
                 data = await asyncio.wait_for(
                     asyncio.to_thread(_ingest_url, req.url), timeout=INGESTION_TIMEOUT_SECS,
                 )
@@ -2932,8 +2932,8 @@ def _completed_pipeline_row(run_id: str, db: Session) -> models.PipelineRun:
 
 
 async def _refetch_pipeline_df(row: models.PipelineRun):
-    from orchestrator.stages import fetch_with_source_fallback
-    from orchestrator.pipeline import LOOKBACK_DAYS
+    from reel_to_pipeline.stages import fetch_with_source_fallback
+    from reel_to_pipeline.pipeline import LOOKBACK_DAYS
     from datetime import date, timedelta
     start = row.start_date or (date.today() - timedelta(days=LOOKBACK_DAYS))
     end = row.end_date or date.today()
@@ -2948,7 +2948,7 @@ async def _refetch_pipeline_df(row: models.PipelineRun):
 
 @app.get(f"{API_PREFIX}/pipeline/{{run_id}}/walk-forward", tags=["Pipeline"])
 async def pipeline_walk_forward(run_id: str, db: Session = Depends(get_db)):
-    from orchestrator.stages import run_walk_forward_detail
+    from reel_to_pipeline.stages import run_walk_forward_detail
     row = _completed_pipeline_row(run_id, db)
     ir = json.loads(row.ir_json)
     df = await _refetch_pipeline_df(row)
@@ -2961,7 +2961,7 @@ async def pipeline_walk_forward(run_id: str, db: Session = Depends(get_db)):
 
 @app.get(f"{API_PREFIX}/pipeline/{{run_id}}/stress-detail", tags=["Pipeline"])
 async def pipeline_stress_detail(run_id: str, db: Session = Depends(get_db)):
-    from orchestrator.stages import run_stress_detail
+    from reel_to_pipeline.stages import run_stress_detail
     row = _completed_pipeline_row(run_id, db)
     ir = json.loads(row.ir_json)
     df = await _refetch_pipeline_df(row)

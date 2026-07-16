@@ -42,13 +42,13 @@ if sys.platform == "win32":
 # ── Bootstrap path so relative imports work ───────────────────────────────────
 sys.path.insert(0, str(Path(__file__).parent))
 
-from data.fetcher    import DataFetcher
-from data.validator  import DataValidator
-from data.eda        import EDAEngine
-from engine.simulator import TradeSimulator
-from engine.metrics  import calculate_metrics
-from frontend.report import generate_report
-from strategies      import STRATEGY_REGISTRY
+from backtesting.data.fetcher    import DataFetcher
+from backtesting.data.validator  import DataValidator
+from backtesting.data.eda        import EDAEngine
+from backtesting.engine.simulator import TradeSimulator
+from backtesting.engine.metrics  import calculate_metrics
+from backtesting.reporting.report import generate_report
+from backtesting.strategies      import STRATEGY_REGISTRY
 
 logging.basicConfig(
     level=logging.INFO,

@@ -46,13 +46,13 @@ if hasattr(sys.stdout, "reconfigure"):
 HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE))
 
-from data.fetcher import DataFetcher
-from data.validator import DataValidator
-from engine.simulator import TradeSimulator
-from engine.metrics import calculate_metrics
-from strategies.grid import GridStrategy
-from strategies.dca import DCAStrategy
-from strategies.pla import PLAStrategy
+from backtesting.data.fetcher import DataFetcher
+from backtesting.data.validator import DataValidator
+from backtesting.engine.simulator import TradeSimulator
+from backtesting.engine.metrics import calculate_metrics
+from backtesting.strategies.grid import GridStrategy
+from backtesting.strategies.dca import DCAStrategy
+from backtesting.strategies.pla import PLAStrategy
 
 # ── Logging — quiet: config.py already called basicConfig(INFO); override it ─
 # Set noisy sub-loggers to WARNING so they don't pollute the progress output.

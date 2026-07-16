@@ -263,10 +263,10 @@ backtester/
 ├── strategies/             # GRID · DCA · PLA · 52 indicator presets · rule-builder
 ├── orchestrator/           # Unified pipeline: stages, task runner, checkpoint sweep, cache
 ├── data/                   # Binance / CoinGecko / yfinance fetchers, NSE/BSE assets
-├── reel_extractor.py       # Reel transcript → strategy IR (LLM) + suggestion normalization
-├── ir_validator.py         # IR schema validation + deterministic LLM-drift auto-repair
-├── improvement_agent.py    # AI strategy-improvement suggestions
-├── ingestion.py            # Reel/video ingestion (yt-dlp, captions)
+├── reel_to_backtest/reel_extractor.py       # Reel transcript → strategy IR (LLM) + suggestion normalization
+├── reel_to_backtest/ir_validator.py         # IR schema validation + deterministic LLM-drift auto-repair
+├── reel_to_backtest/improvement_agent.py    # AI strategy-improvement suggestions
+├── reel_to_backtest/ingestion.py            # Reel/video ingestion (yt-dlp, captions)
 ├── test_all.py             # 44-test pytest suite (118 total across all test_*.py + orchestrator/test_*.py)
 ├── stress_validation.py    # 207-test stress validation
 └── frontend/               # React 18 + Vite + TS + Tailwind

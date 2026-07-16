@@ -60,16 +60,16 @@ if hasattr(sys.stdout, "reconfigure"):
 HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE))
 
-from data.fetcher import DataFetcher
-from data.validator import DataValidator
-from data.indian_assets import is_indian, get_lot_size
-from engine.simulator import TradeSimulator
-from engine.metrics import calculate_metrics
-from engine.regimes import classify_regimes
-from engine import stress as stress_engine
-from engine import forecast as forecast_engine
-from engine.indicators import INDICATOR_CATALOG, compute
-from strategies import STRATEGY_REGISTRY
+from backtesting.data.fetcher import DataFetcher
+from backtesting.data.validator import DataValidator
+from backtesting.data.indian_assets import is_indian, get_lot_size
+from backtesting.engine.simulator import TradeSimulator
+from backtesting.engine.metrics import calculate_metrics
+from backtesting.engine.regimes import classify_regimes
+from stress_testing import stress as stress_engine
+from forward_testing import forecast as forecast_engine
+from backtesting.engine.indicators import INDICATOR_CATALOG, compute
+from backtesting.strategies import STRATEGY_REGISTRY
 
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side

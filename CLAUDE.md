@@ -74,65 +74,69 @@ Stress Testing
 
 ## Repo Layout
 
+**Per-project structure (July 2026 restructure):** the codebase is sorted into six project packages under `backtester/`, one per product area. Shared infrastructure (`main.py` routes, `config.py`, `database.py`, `models.py`) stays at the `backtester/` root. Frontend components mirror the same six folders (plus `shared/`) under `frontend/src/components/`.
+
 ```
 backtester/
-├── main.py                    # FastAPI app — all routes, orchestration
-├── config.py                  # Paths, constants, logging setup
-├── database.py                # SQLAlchemy models + session
-├── models.py                  # Pydantic request/response schemas
+├── main.py                    # FastAPI app — ALL routes for every project, orchestration (shared)
+├── config.py                  # Paths, constants, logging setup (shared)
+├── database.py                # SQLAlchemy models + session (shared)
+├── models.py                  # Pydantic request/response schemas (shared)
 ├── run_backtest.py            # CLI entrypoint (non-server usage)
-├── test_all.py                # 37-test suite (pytest) — includes regime + stress tests
-├── stress_validation.py       # 207-test stress validation script (13×3×3 combos + severity)
+├── test_all.py                # Core pytest suite — regime + stress tests included
+├── test_*.py                  # Additional per-feature test files (root-level)
 │
-├── data/
-│   ├── fetcher.py             # OHLCV fetch: Binance, CoinGecko, yfinance
-│   ├── indian_assets.py       # NSE/BSE symbols, INDEX_MAP, FO_LOT_SIZES, helpers
-│   ├── validator.py           # Data quality checks
-│   └── eda.py                 # Exploratory data analysis helpers
+├── backtesting/               # PROJECT 1 — core backtest engine
+│   ├── engine/
+│   │   ├── simulator.py       # TradeSimulator — WACB, partial fills, lot-size enforcement
+│   │   ├── cost_models.py     # IndianCostModel (Budget 2024), SimpleCostModel
+│   │   ├── metrics.py         # Sharpe, Sortino, Calmar, MDD, Profit Factor, score_backtest
+│   │   ├── regimes.py         # Timeframe-aware regime detection (bull/bear/sideways)
+│   │   ├── indicators.py      # Pure pandas/numpy indicator engine, INDICATOR_CATALOG
+│   │   └── validation.py      # Walk-forward + holdout validation
+│   ├── strategies/            # STRATEGY_REGISTRY: GRID/DCA/PLA + indicator presets + CUSTOM
+│   ├── data/                  # fetcher.py, indian_assets.py, validator.py, eda.py
+│   └── reporting/             # charts.py (Plotly), report.py (HTML report generator)
 │
-├── strategies/
-│   ├── base.py                # BaseStrategy ABC — __init__ sets self.__dict__ from params
-│   ├── grid.py                # Grid strategy (price-level crossing)
-│   ├── dca.py                 # DCA strategy (interval buys)
-│   └── pla.py                 # PLA strategy (EMA crossover + cascading entries)
+├── stress_testing/            # PROJECT 2 — crisis stress tester
+│   └── stress.py              # 17 scenarios, apply_stress(), run_stress_backtest(), MC engine
 │
-├── engine/
-│   ├── simulator.py           # TradeSimulator — WACB, partial fills, lot-size enforcement
-│   ├── cost_models.py         # IndianCostModel (Budget 2024), SimpleCostModel
-│   ├── metrics.py             # Sharpe, Sortino, Calmar, MDD, Profit Factor
-│   ├── regimes.py             # Timeframe-aware regime detection (bull/bear/sideways)
-│   └── stress.py              # Stress engine: 17 scenarios, apply_stress(), run_stress_backtest(),
-│                              #   aggregate_stress_results(), run_single_backtest alias
+├── forward_testing/           # PROJECT 3 — AI forward testing (Kronos + bootstrap)
+│   └── forecast.py            # KronosClient, block bootstrap, generate_paths/generate_one_path
 │
-├── frontend/
-│   ├── charts.py              # Plotly chart generation
-│   └── report.py              # HTML report generator
+├── paper_trading/             # PROJECT 4 — pointer README (routes in main.py, view in frontend)
 │
-├── SUMMARY.md                 # Quant-focused architecture deep-dive
-├── CONTEXT.md                 # Living progress + feature status document
+├── reel_to_backtest/          # PROJECT 5 — reel → strategy extraction
+│   ├── ingestion.py           # yt-dlp download, Groq Whisper transcription, frame OCR
+│   ├── reel_extractor.py      # Two-stage LLM triage + IR extraction
+│   ├── ir_validator.py        # Deterministic validation + auto-repair of LLM output
+│   └── improvement_agent.py   # Critique → Improve → Judge loop
 │
-├── crypto_optimizer.py        # Tests GRID/DCA/PLA on BTC/ETH/BNB/SOL; composite score; HTML report
-├── indian_futures_optimizer.py# Tests GRID/DCA/PLA on NSE F&O with Indian cost model; 792 runs
-├── show_results.py            # Parses optimizer CSV, prints top results per strategy/symbol
-├── explain_india_results.py   # Shows invest-level breakdown, EMA comparison, why #1 beats #2
-├── verify_results.py          # Cross-checks crypto results against Binance API + manual DCA replay
+├── reel_to_pipeline/          # PROJECT 6 — unified pipeline orchestrator (was orchestrator/)
+│   ├── pipeline.py            # Checkpoint state machine, optimization loop, best-IR revert
+│   ├── stages.py              # Stage runners: walk-forward detail, stress detail, report build
+│   └── cache.py               # Pipeline OHLCV/outcome caching
+│
+├── crypto_optimizer.py        # CLI: GRID/DCA/PLA sweep on BTC/ETH/BNB/SOL (root — run from backtester/)
+├── indian_futures_optimizer.py# CLI: NSE F&O sweep with Indian cost model
 ├── optimizer_results/         # Output dir — CSVs, HTML reports, verify TXTs
 │
-└── frontend/                  # React/Vite UI
+└── frontend/                  # React/Vite UI (pure frontend now — python report gen moved out)
     └── src/
-        ├── App.tsx            # Root — page state ('backtest'|'stress'), top nav with page pills
-        ├── api.ts             # runBacktest(), runStressTest(), streamStressTest(), fetchers
-        ├── types.ts           # FormState, BacktestResponse, StressFormState, StressResponse, StreamRun, etc.
+        ├── App.tsx            # Root — page state, top nav pills
+        ├── api.ts             # All API fetchers
+        ├── types.ts           # All shared TS types
         └── components/
-            ├── Sidebar.tsx        # Backtest form controls, F&O validation, Smart Fill, date presets
-            ├── MetricsGrid.tsx    # Performance metrics display (currency-aware)
-            ├── TradeLog.tsx       # Trade table with sort
-            ├── ChartsPanel.tsx    # Equity curve, drawdown, candlestick charts
-            ├── MCPathsCanvas.tsx  # Canvas-based MC spaghetti chart (rainbow, hover, delta view)
-            ├── StressPage.tsx     # Stress page root: streaming state machine + live loading view
-            ├── StressSidebar.tsx  # Stress form: source-aware symbol dropdown, Smart Fill, date presets
-            └── StressResults.tsx  # Verdict, compare cards, MCPathsCard, MC panels
+            ├── backtesting/       # Sidebar, MetricsGrid, TradeLog, ChartsPanel, RegimeBreakdown, ValidationPanel
+            ├── stress_testing/    # StressPage, StressSidebar, StressResults, MCPathsCanvas
+            ├── forward_testing/   # ForwardTestPage, ForwardTestSidebar, ForwardTestResults
+            ├── paper_trading/     # PaperTradeView
+            ├── reel_to_backtest/  # ReelPage, StrategyIREditor, PlainLanguageVerdict, StrategyImprovement
+            ├── reel_to_pipeline/  # PipelinePage
+            └── shared/            # IdentityGate, FeedbackWidget, AdminDashboard, StrategyParamsForm, RuleBuilder
 ```
+
+Import convention after the restructure: `from backtesting.engine.simulator import TradeSimulator`, `from stress_testing.stress import run_stress_backtest`, `from forward_testing import forecast`, `from reel_to_backtest.ir_validator import validate_ir`, `from reel_to_pipeline import pipeline`. The old top-level `engine/`, `strategies/`, `data/`, `orchestrator/` packages and root-level `ingestion.py`/`reel_extractor.py`/`ir_validator.py`/`improvement_agent.py` no longer exist.
 
 ---
 
@@ -151,7 +155,7 @@ backtester/
 
 ### Indian Market
 - Auto-detection: `req.source in ("nse","bse") or is_indian(req.symbol)` → `use_indian_costs=True`
-- Lot sizes from `data/indian_assets.py:FO_LOT_SIZES` — applied only for `market_type in ("futures","options")`
+- Lot sizes from `backtesting/data/indian_assets.py:FO_LOT_SIZES` — applied only for `market_type in ("futures","options")`
 - `get_lot_size(symbol)` returns 1 for non-F&O instruments
 - 422 raised when lot_sz > 1, 0 trades, and BUY signals existed (with guidance message)
 
@@ -181,17 +185,17 @@ backtester/
 These three are the **classic** strategies (category `classic`). See **Indicator Engine & Strategy Extension** below for the indicator presets and rule builder.
 
 ### Indicator Engine & Strategy Extension (ROADMAP.md Track 1)
-- **`engine/indicators.py`** — pure pandas/numpy indicator engine (NO pandas-ta: it breaks on the pinned numpy 2.4 / pandas 3.0). `INDICATOR_CATALOG` (25 indicators, 40 output series, grouped overlap/momentum/trend/volatility/volume) + `compute(df, key, **params) -> DataFrame` with stable output column names (`rsi`, `macd_signal`, `bb_lower`, …). Wilder smoothing in `rma()` is SMA-seeded (RSI/ATR/ADX match textbook values). Exposed via `GET /api/indicators`.
+- **`backtesting/engine/indicators.py`** — pure pandas/numpy indicator engine (NO pandas-ta: it breaks on the pinned numpy 2.4 / pandas 3.0). `INDICATOR_CATALOG` (25 indicators, 40 output series, grouped overlap/momentum/trend/volatility/volume) + `compute(df, key, **params) -> DataFrame` with stable output column names (`rsi`, `macd_signal`, `bb_lower`, …). Wilder smoothing in `rma()` is SMA-seeded (RSI/ATR/ADX match textbook values). Exposed via `GET /api/indicators`.
 - **Schema-driven params:** `BaseStrategy.parameter_schema()` returns structured UI metadata per param (`type/label/min/max/step/options/group/depends_on`), built by `param_schema()` (rich declarations via the `Param(...)` helper) overlaid on values auto-derived from `default_params()`. `BaseStrategy.category()` returns `classic|indicator|custom`. `GET /api/strategies` now returns `category` + `schema` alongside flat `parameters`.
-- **`signals_from_masks(df, entry_mask, exit_mask, invest_usd, qty_fallback)`** (in `strategies/base.py`) — shared long-only state machine converting boolean masks → signal/quantity/meta. Used by every indicator preset AND the rule builder, so signal-walking lives in one place.
+- **`signals_from_masks(df, entry_mask, exit_mask, invest_usd, qty_fallback)`** (in `backtesting/strategies/base.py`) — shared long-only state machine converting boolean masks → signal/quantity/meta. Used by every indicator preset AND the rule builder, so signal-walking lives in one place.
 - **Indicator presets** (category `indicator`, registered in `STRATEGY_REGISTRY`): `RSI`, `MACD`, `BOLLINGER`, `SUPERTREND`, `DONCHIAN`, `MACROSS`. Each uses `compute()` + `signals_from_masks`, dollar-or-units sizing via `invest_per_trade_usd`/`quantity`.
-- **Rule builder** (`strategies/custom.py: CustomStrategy`, category `custom`, name `CUSTOM`): `entry_rules`/`exit_rules` are condition lists (`{left, operator (>/</>=/<=/cross_above/cross_below), right}` where operands are `{indicator,params,output}` | `{price}` | `{value}`), combined via `logic` AND/OR. Evaluator computes indicators via the engine → boolean masks → `signals_from_masks`.
+- **Rule builder** (`backtesting/strategies/custom.py: CustomStrategy`, category `custom`, name `CUSTOM`): `entry_rules`/`exit_rules` are condition lists (`{left, operator (>/</>=/<=/cross_above/cross_below), right}` where operands are `{indicator,params,output}` | `{price}` | `{value}`), combined via `logic` AND/OR. Evaluator computes indicators via the engine → boolean masks → `signals_from_masks`.
 - **Frontend (hybrid):** classic GRID/DCA/PLA keep their dedicated flat form fields; all other strategies use the schema-driven `StrategyParamsForm.tsx` (renders from `/api/strategies` schema, honors `group`/`depends_on`), and `CUSTOM` uses `RuleBuilder.tsx` (fetches `/api/indicators`). `FormState`/`StressFormState` gained `strategyParams: Record<string, unknown>`; `Strategy` type is now `string`; `buildStrategyParams` returns `strategyParams` for non-classic strategies. The strategy dropdown (Sidebar + StressSidebar) is populated from `/api/strategies`, grouped by category.
 
 ### Strategy-Outcome Logging (ROADMAP.md Track 2 / Phase 0 — moat seed)
 - `models.StrategyOutcome` table: append-only `{strategy, category, params, symbol, source, interval, dates, regime_mix, outcome metrics}` written on every backtest (best-effort; a logging failure never fails the run). Auto-created via `create_all` — no migration. Seeds the future strategy-intelligence ranker. Observable via `GET /api/strategy-outcomes/summary`.
 
-### Metrics (all via `engine/metrics.py`)
+### Metrics (all via `backtesting/engine/metrics.py`)
 - Annualisation: `TRADING_DAYS_PER_YEAR = 252`
 - Sharpe: `(mean_daily_return - rf) / std_daily_return * sqrt(252)` — `rf = 0`
 - Sortino: uses only negative daily returns for denominator
@@ -199,12 +203,12 @@ These three are the **classic** strategies (category `classic`). See **Indicator
 - MDD: rolling peak-to-trough on equity curve
 - `win_rate` is returned as **0–100 range** (e.g. 57.5 means 57.5%), NOT 0–1. Do not multiply by 100.
 
-### Regime Detection (`engine/regimes.py`)
+### Regime Detection (`backtesting/engine/regimes.py`)
 - **Timeframe-aware MA windows:** windows are sized in real trading days using `_candles_per_day(timestamps)`, then converted back to candles. A 1d and 4h backtest of the same period get semantically equivalent labels.
 - `method` field returns `"ma_trend_tf_aware"` — consumers can detect the new logic.
 - `classify_regimes(df)` is called from `main.py` after every backtest.
 
-### Stress Tester (`engine/stress.py`)
+### Stress Tester (`stress_testing/stress.py`)
 - **`apply_stress(df, scenario, severity, seed)`** — pure function, deep-copies input, returns perturbed OHLCV DataFrame. Never mutates input.
 - **`_apply_drift(..., persist=True/False)`** — `persist=True` means prices from `end` onwards are also scaled by the final multiplier (no snap-back). Used for all "permanent" crash scenarios.
 - **17 presets** in `SCENARIO_PRESETS` dict (13 global + 4 Indian: `demonetization_2016`, `covid_nifty_mar2020`, `yes_bank_2020`, `expiry_gamma_squeeze`). Key presets with `persist=True`:
@@ -267,7 +271,7 @@ Before allowing Run, checks:
 2. For F&O (`futures`/`options`): `investAmt >= lotSize * approxPrice * 1.05`
 3. For non-F&O: warns if `investAmt < capital * 0.005`
 
-`FO_LOT_SIZES` and `APPROX_PRICES` lookup tables are duplicated in `Sidebar.tsx` (frontend copy for pre-flight checks — keep in sync with `data/indian_assets.py`).
+`FO_LOT_SIZES` and `APPROX_PRICES` lookup tables are duplicated in `Sidebar.tsx` (frontend copy for pre-flight checks — keep in sync with `backtesting/data/indian_assets.py`).
 
 ---
 
@@ -343,10 +347,10 @@ python stress_validation.py
 
 ## Do NOT
 
-- Do not add `pandas-ta` (or any TA lib that does `from numpy import NaN`) — it breaks on the pinned numpy 2.4 / pandas 3.0 and the Railway build. Add indicators to `engine/indicators.py` in pure pandas/numpy instead, and register them in `INDICATOR_CATALOG` (with `outputs` column names).
-- Do not add a new strategy without registering it in `STRATEGY_REGISTRY` (`strategies/__init__.py`) and giving it a `CATEGORY` + `param_schema()`. The frontend dropdown and forms are driven by `/api/strategies`, so a registered strategy with a schema needs **zero** frontend changes (non-classic strategies render via `StrategyParamsForm`/`RuleBuilder` automatically).
+- Do not add `pandas-ta` (or any TA lib that does `from numpy import NaN`) — it breaks on the pinned numpy 2.4 / pandas 3.0 and the Railway build. Add indicators to `backtesting/engine/indicators.py` in pure pandas/numpy instead, and register them in `INDICATOR_CATALOG` (with `outputs` column names).
+- Do not add a new strategy without registering it in `STRATEGY_REGISTRY` (`backtesting/strategies/__init__.py`) and giving it a `CATEGORY` + `param_schema()`. The frontend dropdown and forms are driven by `/api/strategies`, so a registered strategy with a schema needs **zero** frontend changes (non-classic strategies render via `StrategyParamsForm`/`RuleBuilder` automatically).
 - Do not add dedicated flat FormState fields for new strategies — only the three classic ones (GRID/DCA/PLA) use flat fields; everything else flows through `form.strategyParams`. `buildStrategyParams` returns `strategyParams` for non-classic strategies.
-- Do not modify `FO_LOT_SIZES` in `Sidebar.tsx` without also updating `data/indian_assets.py` (they must stay in sync). Same applies to `StressSidebar.tsx`.
+- Do not modify `FO_LOT_SIZES` in `Sidebar.tsx` without also updating `backtesting/data/indian_assets.py` (they must stay in sync). Same applies to `StressSidebar.tsx`.
 - Do not use `%%` in Python f-strings (prints two `%` signs — just use `%`)
 - Do not call `_calculate_cost(..., track=True)` twice for the same trade leg
 - Do not use `en-US` locale for Indian ₹ amounts — use `en-IN`

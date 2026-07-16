@@ -59,15 +59,15 @@ HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE))
 
 import logging
-from data.fetcher import DataFetcher
-from data.validator import DataValidator
-from data.indian_assets import get_lot_size, INDEX_MAP, to_yf_symbol
-from engine.simulator import TradeSimulator
-from engine.metrics import calculate_metrics
-from engine.cost_models import IndianCostModel
-from strategies.grid import GridStrategy
-from strategies.dca import DCAStrategy
-from strategies.pla import PLAStrategy
+from backtesting.data.fetcher import DataFetcher
+from backtesting.data.validator import DataValidator
+from backtesting.data.indian_assets import get_lot_size, INDEX_MAP, to_yf_symbol
+from backtesting.engine.simulator import TradeSimulator
+from backtesting.engine.metrics import calculate_metrics
+from backtesting.engine.cost_models import IndianCostModel
+from backtesting.strategies.grid import GridStrategy
+from backtesting.strategies.dca import DCAStrategy
+from backtesting.strategies.pla import PLAStrategy
 
 # Silence internal loggers
 for _ns in ("data", "strategies", "engine", "frontend", ""):

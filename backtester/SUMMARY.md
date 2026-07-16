@@ -652,7 +652,7 @@ The frontend uses `fetch` + `ReadableStream` (not `EventSource`) to consume the 
 
 ### 10.5 Walk-Forward Validation
 
-`engine/validation.py` provides `WalkForwardValidator` which:
+`backtesting/engine/validation.py` provides `WalkForwardValidator` which:
 1. Splits the date range into rolling windows of `wf_window` months
 2. On each train window: grid-searches over strategy param variations, picks best Sharpe
 3. Tests the winning params on the subsequent `wf_step`-month out-of-sample window

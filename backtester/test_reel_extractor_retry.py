@@ -1,6 +1,6 @@
 import json
 
-import reel_extractor
+from reel_to_backtest import reel_extractor
 
 
 def test_normalize_to_ir_with_retry_uses_first_result_when_non_null(monkeypatch):

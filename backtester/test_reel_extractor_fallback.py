@@ -1,6 +1,6 @@
 import json
 
-import reel_extractor
+from reel_to_backtest import reel_extractor
 
 
 def test_suggest_fallback_ir_returns_disclaimer_and_decoded_ir_from_llm(monkeypatch):

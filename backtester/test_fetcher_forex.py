@@ -5,7 +5,7 @@ _FOREX_COMMODITY_MAP, so yfinance got the raw ticker and returned no data.
 Any <CCY><CCY> currency pair must map to Yahoo's <CCYCCY>=X format, not just
 the handful of pairs someone happened to enumerate.
 """
-from data.fetcher import YFinanceFetcher, is_forex_pair
+from backtesting.data.fetcher import YFinanceFetcher, is_forex_pair
 
 
 def test_to_yf_symbol_generalizes_currency_pairs():

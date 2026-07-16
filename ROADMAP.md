@@ -49,7 +49,7 @@ The approved plan specified **pandas-ta**. On inspection, `requirements.txt` pin
 ## Track 1 — Strategy Breadth
 
 ### Phase A — Indicator Engine Foundation
-`backtester/engine/indicators.py` (pure pandas/numpy):
+`backtester/backtesting/engine/indicators.py` (pure pandas/numpy):
 - `INDICATOR_CATALOG` — registry of indicators with UI/rule-builder metadata: `{key, label, group (momentum/trend/volatility/volume/overlap), params:[{name,default,min,max}], outputs:[col names]}`.
 - `compute(df, key, **params)` → named output column(s) with stable keys.
 - Groups: overlap (SMA/EMA/WMA/VWAP/HMA…), momentum (RSI/MACD/Stoch/CCI/ROC/Williams %R…), trend (ADX/Aroon/Supertrend/PSAR…), volatility (ATR/Bollinger/Keltner/Donchian…), volume (OBV/MFI/CMF…).
@@ -65,7 +65,7 @@ The approved plan specified **pandas-ta**. On inspection, `requirements.txt` pin
 `RSIStrategy`, `MACDStrategy`, `BollingerStrategy`, `SupertrendStrategy`, `DonchianBreakoutStrategy`, `MACrossStrategy` — each a `BaseStrategy` using the engine, declaring a schema, emitting the `signal`/`quantity`/`meta` contract, registered in `STRATEGY_REGISTRY`. Per-strategy signal tests.
 
 ### Phase D — Generic Rule Builder ("strategies we can create")
-- `strategies/custom.py: CustomStrategy` — `entry_rules`/`exit_rules` as condition lists (`left_indicator, operator (>/</cross_above/cross_below), right: value|indicator`), combined via AND/OR; evaluator computes indicators via the engine and emits BUY/SELL/HOLD. Category `custom`.
+- `backtesting/strategies/custom.py: CustomStrategy` — `entry_rules`/`exit_rules` as condition lists (`left_indicator, operator (>/</cross_above/cross_below), right: value|indicator`), combined via AND/OR; evaluator computes indicators via the engine and emits BUY/SELL/HOLD. Category `custom`.
 - `RuleBuilder.tsx` — fetches `/api/indicators`, lets users compose conditions, serialises into `strategyParams`. Rendered when strategy is `CUSTOM`.
 
 ---
@@ -79,7 +79,7 @@ The approved plan specified **pandas-ta**. On inspection, `requirements.txt` pin
 Redis + RQ job queue (move forecast/heavy backtests off the request thread); SQLite → Postgres via `DATABASE_URL` + Alembic. Prerequisite for GPU work and for scaling the current blocking endpoints.
 
 ### Phase 2 — AI Forward-Test (Kronos zero-shot) — FLAGSHIP
-`engine/forecast.py` `KronosClient` (HTTP, `KRONOS_URL`) + `kronos_service/` (Modal/FastAPI loading Kronos-small + tokenizer). `POST /api/forecast/run` + `/stream` mirror the stress endpoints, **reusing** `run_single_backtest` + `aggregate_stress_results` + the SSE contract + `MCPathsCanvas`. Frontend "Forward Test" page pill. GPU on Modal scale-to-zero (or CPU at MVP); cache paths by context-hash.
+`forward_testing/forecast.py` `KronosClient` (HTTP, `KRONOS_URL`) + `kronos_service/` (Modal/FastAPI loading Kronos-small + tokenizer). `POST /api/forecast/run` + `/stream` mirror the stress endpoints, **reusing** `run_single_backtest` + `aggregate_stress_results` + the SSE contract + `MCPathsCanvas`. Frontend "Forward Test" page pill. GPU on Modal scale-to-zero (or CPU at MVP); cache paths by context-hash.
 
 ### Phase 3 — Crisis Simulator
 Map `SCENARIO_PRESETS` (17) to a Kronos+scaffold hybrid: the stress scaffold imposes the macro shock shape, Kronos fills realistic micro-structure. "Show me a flash crash" → preset + generated variants.
@@ -107,19 +107,19 @@ The first five are Track-1 (ship now, no infra). Outcome logging is slotted seco
 ## Reuse (don't reinvent)
 
 - Strategy contract & dispatch: `BaseStrategy`, `STRATEGY_REGISTRY`, `main.py` dispatch — new strategies plug in unchanged.
-- Signal→trade execution: `engine/simulator.py` (BUY/SELL/HOLD + `quantity`) — simulator, cost models, metrics, regimes, stress all work unchanged.
+- Signal→trade execution: `backtesting/engine/simulator.py` (BUY/SELL/HOLD + `quantity`) — simulator, cost models, metrics, regimes, stress all work unchanged.
 - The stress pipeline (`run_single_backtest`, `aggregate_stress_results`, SSE, `MCPathsCanvas`) is reused verbatim by Kronos forward-test — this is why Track 2's flagship is cheap.
 
 ---
 
 ## Current implementation status
 
-- [x] Track 1 / Phase A — indicator engine (`engine/indicators.py`, 25 indicators / 40 series) + `GET /api/indicators`
+- [x] Track 1 / Phase A — indicator engine (`backtesting/engine/indicators.py`, 25 indicators / 40 series) + `GET /api/indicators`
 - [x] Track 2 / Phase 0 — outcome logging (`StrategyOutcome` table + `/api/strategy-outcomes/summary`)
 - [x] Track 1 / Phase B — schema-driven forms (`parameter_schema` + `StrategyParamsForm.tsx`; hybrid: classic strategies keep flat fields)
 - [x] Track 1 / Phase C — preset strategies (RSI, MACD, Bollinger, Supertrend, Donchian, MACross)
-- [x] Track 1 / Phase D — rule builder (`strategies/custom.py` + `RuleBuilder.tsx`)
-- [x] Track 2 / Phase K1 — AI Forward-Test (`engine/forecast.py` block-bootstrap + `POST /api/forecast/run|stream` + `ForwardTestPage` + `ForwardTestSidebar` + `ForwardTestResults`; Kronos GPU slots in via `KRONOS_URL` env var with zero code change)
+- [x] Track 1 / Phase D — rule builder (`backtesting/strategies/custom.py` + `RuleBuilder.tsx`)
+- [x] Track 2 / Phase K1 — AI Forward-Test (`forward_testing/forecast.py` block-bootstrap + `POST /api/forecast/run|stream` + `ForwardTestPage` + `ForwardTestSidebar` + `ForwardTestResults`; Kronos GPU slots in via `KRONOS_URL` env var with zero code change)
 - [ ] Track 2 / Phase K2 — Async queue + Postgres (Redis/RQ; prerequisite for GPU work and scaling)
 - [x] Track 2 / Phase K3 — Crisis Simulator hybrid (`/api/forecast/crisis/stream`: Kronos block-bootstrap path + `apply_stress` scaffold overlay per run; frontend mode toggle in `ForwardTestPage`)
 - [ ] Track 2 / Phase K4 — Strategy-Intelligence ranker (GBM on StrategyOutcome log)
