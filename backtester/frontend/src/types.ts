@@ -698,11 +698,56 @@ export interface PipelineChip {
   kind: "instant" | "live";
 }
 
+export interface CompositeBreakdownRow {
+  key: string;
+  label: string;
+  weight: number;
+  value: number | null;
+  normalized: number;
+  contribution: number;
+}
+
 export interface PipelineReport {
   verdict: string;
   last_score: number | null;
   chips: PipelineChip[];
   paper_trading_result?: Record<string, unknown>;
+  composite_breakdown?: CompositeBreakdownRow[] | null;
+}
+
+export interface WalkForwardWindow {
+  window_num: number;
+  train_period: string;
+  test_period: string;
+  best_params: string;
+  train_sharpe: number;
+  return_pct: number;
+  sharpe: number;
+  max_dd_pct: number;
+  num_trades: number;
+  win_rate: number;
+}
+
+export interface WalkForwardDetail {
+  mode: string;
+  window: number;
+  step: number;
+  num_windows: number;
+  windows: WalkForwardWindow[];
+  out_of_sample: Record<string, number>;
+}
+
+export interface StressDetailScenario {
+  scenario: string;
+  display_name: string;
+  baseline_return_pct: number;
+  stressed_return_pct: number;
+  delta_pct: number;
+  verdict: "SURVIVED" | "DEGRADED" | "SEVERE";
+}
+
+export interface StressDetailResult {
+  scenarios: StressDetailScenario[];
 }
 
 export interface PipelineRoundScore {

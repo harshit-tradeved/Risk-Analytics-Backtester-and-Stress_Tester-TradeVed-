@@ -824,3 +824,15 @@ export async function resumePipelineRun(runId: string): Promise<void> {
   const resp = await fetch(`${API_BASE}/api/pipeline/${runId}/resume`, { method: "POST" });
   if (!resp.ok) throw new Error("Failed to resume run");
 }
+
+export async function getPipelineWalkForward(runId: string): Promise<import("./types").WalkForwardDetail> {
+  const resp = await fetch(`${API_BASE}/api/pipeline/${runId}/walk-forward`);
+  if (!resp.ok) throw new Error((await resp.json().catch(() => null))?.detail || "Failed to load walk-forward detail");
+  return resp.json();
+}
+
+export async function getPipelineStressDetail(runId: string): Promise<import("./types").StressDetailResult> {
+  const resp = await fetch(`${API_BASE}/api/pipeline/${runId}/stress-detail`);
+  if (!resp.ok) throw new Error((await resp.json().catch(() => null))?.detail || "Failed to load stress detail");
+  return resp.json();
+}

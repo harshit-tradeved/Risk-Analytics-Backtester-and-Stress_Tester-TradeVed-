@@ -1,9 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   startPipeline, getPipelineRun, submitPipelineCheckpoint,
   retryPipelineSymbol, resumePipelineRun, PipelineRunNotFoundError,
+  getPipelineWalkForward, getPipelineStressDetail,
 } from "../api";
-import type { PipelineRunState, PipelineRoundScore, PipelineStatus } from "../types";
+import type {
+  PipelineRunState, PipelineRoundScore, PipelineStatus,
+  WalkForwardDetail, StressDetailResult,
+} from "../types";
 
 const POLL_MS = 2000;
 const TOTAL_ROUNDS = 5;
@@ -224,6 +228,172 @@ function HoldoutPanel({ holdout }: { holdout: NonNullable<PipelineRunState["hold
   );
 }
 
+// ── Composite score math panel ───────────────────────────────────────────────
+function CompositeMathPanel({ report }: { report: NonNullable<PipelineRunState["report"]> }) {
+  const rows = report.composite_breakdown;
+  if (!rows || rows.length === 0) {
+    return <p className="text-sm text-gray-500">No completed round to break down yet.</p>;
+  }
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-gray-500">
+        The best round's composite score is a weighted blend of five metrics. Each row shows
+        how much that metric contributed to the final score of <span className="font-semibold text-gray-700">{fmtNum(report.last_score)}</span>.
+      </p>
+      <div className="border border-gray-200 rounded-lg overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-xs text-gray-500 border-b border-gray-200 bg-gray-50">
+              <th className="text-left px-3 py-2 font-medium">Metric</th>
+              <th className="text-right px-3 py-2 font-medium">Value</th>
+              <th className="text-right px-3 py-2 font-medium">Weight</th>
+              <th className="text-right px-3 py-2 font-medium">Normalized</th>
+              <th className="text-right px-3 py-2 font-medium">Contribution</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.key} className="border-b border-gray-100 last:border-0">
+                <td className="px-3 py-1.5">{r.label}</td>
+                <td className="text-right px-3 py-1.5">{fmtNum(r.value)}</td>
+                <td className="text-right px-3 py-1.5">{Math.round(r.weight * 100)}%</td>
+                <td className="text-right px-3 py-1.5">{fmtNum(r.normalized)}</td>
+                <td className="text-right px-3 py-1.5 font-medium">{fmtNum(r.contribution)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ── Walk-forward fold breakdown panel ────────────────────────────────────────
+function WalkForwardPanel({ data }: { data: WalkForwardDetail }) {
+  if (!data.windows.length) {
+    return <p className="text-sm text-gray-500">Not enough data for a walk-forward split on this run.</p>;
+  }
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-gray-500">
+        {data.num_windows} rolling fold{data.num_windows === 1 ? "" : "s"} — each trains on a window,
+        grid-searches the best params, then tests on the next out-of-sample step.
+      </p>
+      <div className="border border-gray-200 rounded-lg overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-xs text-gray-500 border-b border-gray-200 bg-gray-50">
+              <th className="text-left px-3 py-2 font-medium">Fold</th>
+              <th className="text-left px-3 py-2 font-medium">Train</th>
+              <th className="text-left px-3 py-2 font-medium">Test (OOS)</th>
+              <th className="text-right px-3 py-2 font-medium">OOS Return %</th>
+              <th className="text-right px-3 py-2 font-medium">OOS Sharpe</th>
+              <th className="text-right px-3 py-2 font-medium">Trades</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.windows.map((w) => (
+              <tr key={w.window_num} className="border-b border-gray-100 last:border-0">
+                <td className="px-3 py-1.5">{w.window_num}</td>
+                <td className="px-3 py-1.5 text-xs text-gray-600">{w.train_period}</td>
+                <td className="px-3 py-1.5 text-xs text-gray-600">{w.test_period}</td>
+                <td className="text-right px-3 py-1.5">{fmtNum(w.return_pct)}</td>
+                <td className="text-right px-3 py-1.5">{fmtNum(w.sharpe)}</td>
+                <td className="text-right px-3 py-1.5">{fmtInt(w.num_trades)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-gray-500">
+        Aggregated out-of-sample: {fmtNum(data.out_of_sample?.total_return_pct)}% return,
+        {" "}{fmtNum(data.out_of_sample?.sharpe_ratio)} Sharpe across all folds stitched together.
+      </p>
+    </div>
+  );
+}
+
+// ── Stress test detail panel ─────────────────────────────────────────────────
+const STRESS_VERDICT_PILL: Record<string, string> = {
+  SURVIVED: "bg-green-100 text-green-700 border-green-300",
+  DEGRADED: "bg-yellow-100 text-yellow-700 border-yellow-300",
+  SEVERE:   "bg-red-100 text-red-700 border-red-300",
+};
+
+function StressDetailPanel({ data }: { data: StressDetailResult }) {
+  if (!data.scenarios.length) {
+    return <p className="text-sm text-gray-500">Stress detail could not be computed for this run.</p>;
+  }
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-gray-500">
+        A quick single-pass check across {data.scenarios.length} historical stress scenarios (one
+        run each, not the full 100-run Stress Tester) — shows how this strategy would have reacted.
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {data.scenarios.map((s) => (
+          <div key={s.scenario} className="border border-gray-200 rounded-lg p-3 flex items-center justify-between gap-2">
+            <div>
+              <p className="text-sm font-medium text-gray-800">{s.display_name}</p>
+              <p className="text-xs text-gray-500">
+                Baseline {fmtNum(s.baseline_return_pct)}% → Stressed {fmtNum(s.stressed_return_pct)}%
+              </p>
+            </div>
+            <span className={`px-2 py-0.5 rounded-full border text-xs font-semibold whitespace-nowrap ${STRESS_VERDICT_PILL[s.verdict] ?? ""}`}>
+              {s.verdict}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Paper trading panel ──────────────────────────────────────────────────────
+function PaperTradingPanel({ report }: { report: NonNullable<PipelineRunState["report"]> }) {
+  const result = report.paper_trading_result;
+  if (!result) {
+    return (
+      <p className="text-sm text-gray-500">
+        Paper trading is still running in the background — check back in a moment.
+      </p>
+    );
+  }
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div>
+        <p className="text-xs text-gray-500">Return</p>
+        <p className="text-sm font-semibold text-gray-800">{fmtNum(result.total_return_pct as number)}%</p>
+      </div>
+      <div>
+        <p className="text-xs text-gray-500">Sharpe</p>
+        <p className="text-sm font-semibold text-gray-800">{fmtNum(result.sharpe_ratio as number)}</p>
+      </div>
+      <div>
+        <p className="text-xs text-gray-500">Trades</p>
+        <p className="text-sm font-semibold text-gray-800">{fmtInt(result.num_trades as number)}</p>
+      </div>
+      <div>
+        <p className="text-xs text-gray-500">Max drawdown</p>
+        <p className="text-sm font-semibold text-gray-800">{fmtNum(result.max_drawdown_pct as number)}%</p>
+      </div>
+    </div>
+  );
+}
+
+// ── Generic expandable chip panel wrapper ────────────────────────────────────
+function ChipPanel({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  return (
+    <div className="border border-indigo-200 bg-indigo-50/30 rounded-xl p-4 space-y-2">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
+        <button className="text-xs text-gray-400 hover:text-gray-600" onClick={onClose}>Close</button>
+      </div>
+      {children}
+    </div>
+  );
+}
+
 // ── Checkpoint countdown ─────────────────────────────────────────────────────
 function CheckpointCountdown({ openedAt }: { openedAt: string }) {
   const [nowTs, setNowTs] = useState(() => Date.now());
@@ -350,7 +520,13 @@ function CheckpointView({
 }
 
 // ── Main page ────────────────────────────────────────────────────────────────
-const IMPLEMENTED_CHIPS = new Set(["retry_symbol"]);
+const IMPLEMENTED_CHIPS = new Set([
+  "retry_symbol", "composite_math", "paper_trading", "walk_forward", "stress_detail",
+]);
+// Chips whose data lives in an already-fetched field on the run/report — no on-demand request needed.
+const INSTANT_CHIPS = new Set(["composite_math", "paper_trading"]);
+// Chips that need a separate on-demand request the first time they're opened.
+const FETCHABLE_CHIPS = new Set(["walk_forward", "stress_detail"]);
 
 const STATUS_BADGE: Record<string, string> = {
   complete:    "bg-green-100 text-green-700",
@@ -367,6 +543,11 @@ export default function PipelinePage({ userId }: { userId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [checkpointTweak, setCheckpointTweak] = useState("");
   const [retrySymbol, setRetrySymbol] = useState("");
+  const [openChip, setOpenChip] = useState<string | null>(null);
+  const [walkForward, setWalkForward] = useState<WalkForwardDetail | null>(null);
+  const [stressDetail, setStressDetail] = useState<StressDetailResult | null>(null);
+  const [chipLoading, setChipLoading] = useState<string | null>(null);
+  const [chipError, setChipError] = useState<string | null>(null);
   const pollRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -420,6 +601,10 @@ export default function PipelinePage({ userId }: { userId: string }) {
     setRun(null);
     setError(null);
     setRetrySymbol("");
+    setOpenChip(null);
+    setWalkForward(null);
+    setStressDetail(null);
+    setChipError(null);
   };
 
   const handleConfirm = async () => {
@@ -450,6 +635,24 @@ export default function PipelinePage({ userId }: { userId: string }) {
     if (!runId) return;
     try { await resumePipelineRun(runId); }
     catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+  };
+
+  const handleChipClick = async (chipId: string) => {
+    if (openChip === chipId) { setOpenChip(null); return; }
+    setOpenChip(chipId);
+    setChipError(null);
+    if (!runId || !FETCHABLE_CHIPS.has(chipId)) return;
+    if (chipId === "walk_forward" && walkForward) return;
+    if (chipId === "stress_detail" && stressDetail) return;
+    setChipLoading(chipId);
+    try {
+      if (chipId === "walk_forward") setWalkForward(await getPipelineWalkForward(runId));
+      if (chipId === "stress_detail") setStressDetail(await getPipelineStressDetail(runId));
+    } catch (e) {
+      setChipError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setChipLoading(null);
+    }
   };
 
   const isTerminal = run?.status === "complete" || run?.status === "failed";
@@ -565,39 +768,81 @@ export default function PipelinePage({ userId }: { userId: string }) {
               {run.holdout_result && <HoldoutPanel holdout={run.holdout_result} />}
 
               <div className="flex flex-wrap items-center gap-2">
-                {run.report.chips.map((chip) =>
-                  IMPLEMENTED_CHIPS.has(chip.id) ? (
-                    <div key={chip.id} className="flex items-center gap-2 border border-gray-200 rounded-full pl-3 pr-1.5 py-1">
-                      <span className="inline-block w-2 h-2 rounded-full bg-indigo-500" />
-                      <span className="text-sm text-gray-700">{chip.label}</span>
-                      <input
-                        className="w-28 border border-gray-200 rounded-lg px-2 py-0.5 text-sm focus:outline-none focus:border-indigo-400"
-                        placeholder="ETH/USDT"
-                        value={retrySymbol}
-                        onChange={(e) => setRetrySymbol(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === "Enter") handleRetrySymbol(); }}
-                      />
-                      <button
-                        className="px-2.5 py-0.5 rounded-full bg-indigo-600 text-white text-sm disabled:opacity-40 disabled:cursor-default"
-                        disabled={!retrySymbol.trim()}
-                        onClick={handleRetrySymbol}
+                {run.report.chips.map((chip) => {
+                  if (!IMPLEMENTED_CHIPS.has(chip.id)) {
+                    return (
+                      <span
+                        key={chip.id}
+                        className="px-3 py-1 rounded-full border border-gray-200 text-sm text-gray-400 cursor-default select-none"
+                        title="Coming soon"
                       >
-                        Go
-                      </button>
-                    </div>
-                  ) : (
-                    <span
+                        <span className="inline-block w-2 h-2 rounded-full mr-2 bg-gray-300" />
+                        {chip.label}
+                        <span className="ml-1.5 text-[10px] uppercase tracking-wide text-gray-400">soon</span>
+                      </span>
+                    );
+                  }
+                  if (chip.id === "retry_symbol") {
+                    return (
+                      <div key={chip.id} className="flex items-center gap-2 border border-gray-200 rounded-full pl-3 pr-1.5 py-1">
+                        <span className="inline-block w-2 h-2 rounded-full bg-indigo-500" />
+                        <span className="text-sm text-gray-700">{chip.label}</span>
+                        <input
+                          className="w-28 border border-gray-200 rounded-lg px-2 py-0.5 text-sm focus:outline-none focus:border-indigo-400"
+                          placeholder="ETH/USDT"
+                          value={retrySymbol}
+                          onChange={(e) => setRetrySymbol(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") handleRetrySymbol(); }}
+                        />
+                        <button
+                          className="px-2.5 py-0.5 rounded-full bg-indigo-600 text-white text-sm disabled:opacity-40 disabled:cursor-default"
+                          disabled={!retrySymbol.trim()}
+                          onClick={handleRetrySymbol}
+                        >
+                          Go
+                        </button>
+                      </div>
+                    );
+                  }
+                  const isOpen = openChip === chip.id;
+                  return (
+                    <button
                       key={chip.id}
-                      className="px-3 py-1 rounded-full border border-gray-200 text-sm text-gray-400 cursor-default select-none"
-                      title="Coming soon"
+                      className={`flex items-center gap-2 border rounded-full pl-3 pr-3 py-1 text-sm ${
+                        isOpen ? "border-indigo-400 bg-indigo-50 text-indigo-700" : "border-gray-200 text-gray-700 hover:bg-gray-50"
+                      }`}
+                      onClick={() => handleChipClick(chip.id)}
                     >
-                      <span className="inline-block w-2 h-2 rounded-full mr-2 bg-gray-300" />
+                      <span className={`inline-block w-2 h-2 rounded-full ${INSTANT_CHIPS.has(chip.id) ? "bg-indigo-500" : "bg-emerald-500"}`} />
                       {chip.label}
-                      <span className="ml-1.5 text-[10px] uppercase tracking-wide text-gray-400">soon</span>
-                    </span>
-                  ),
-                )}
+                      {chipLoading === chip.id && <Spinner />}
+                    </button>
+                  );
+                })}
               </div>
+
+              {chipError && <p className="text-sm text-red-600">{chipError}</p>}
+
+              {openChip === "composite_math" && (
+                <ChipPanel title="Composite score math" onClose={() => setOpenChip(null)}>
+                  <CompositeMathPanel report={run.report} />
+                </ChipPanel>
+              )}
+              {openChip === "paper_trading" && (
+                <ChipPanel title="Paper trading" onClose={() => setOpenChip(null)}>
+                  <PaperTradingPanel report={run.report} />
+                </ChipPanel>
+              )}
+              {openChip === "walk_forward" && walkForward && (
+                <ChipPanel title="Walk-forward fold breakdown" onClose={() => setOpenChip(null)}>
+                  <WalkForwardPanel data={walkForward} />
+                </ChipPanel>
+              )}
+              {openChip === "stress_detail" && stressDetail && (
+                <ChipPanel title="Stress test detail" onClose={() => setOpenChip(null)}>
+                  <StressDetailPanel data={stressDetail} />
+                </ChipPanel>
+              )}
             </div>
           )}
         </div>
