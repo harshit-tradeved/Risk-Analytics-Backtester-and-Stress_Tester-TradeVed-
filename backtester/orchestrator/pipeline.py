@@ -10,10 +10,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import random
 import uuid
 from datetime import date, datetime, timedelta
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
@@ -49,6 +50,25 @@ _TASK_REQUIRED_STATUSES = ("running", "looping", "holdout")
 # run_id -> asyncio.Task, so the sweep can tell "genuinely still running" from
 # "row says running but the process restarted and the task is gone."
 _live_tasks: dict[str, "asyncio.Task"] = {}
+
+
+def _sanitize_metrics(obj: Any) -> Any:
+    """
+    Recursively replace inf/nan floats with JSON-safe sentinels before
+    persisting to *_json columns. Mirrors main.py's _sanitize/_safe_float —
+    duplicated (not imported) to avoid a circular import, since main.py
+    imports this module at load time.
+    """
+    if isinstance(obj, dict):
+        return {k: _sanitize_metrics(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_metrics(v) for v in obj]
+    if isinstance(obj, float):
+        if math.isnan(obj):
+            return 0.0
+        if math.isinf(obj):
+            return 9999.0 if obj > 0 else -9999.0
+    return obj
 
 
 class ActiveRunExistsError(Exception):
@@ -95,6 +115,7 @@ def start_run(
         row = models.PipelineRun(
             id=run_id, user_id=user_id, status="running", stage="extracting",
             symbol=symbol, timeframe=interval, source=source, capital=capital,
+            start_date=start_date, end_date=end_date,
         )
         db.add(row)
         db.commit()
@@ -206,9 +227,11 @@ async def _run_loop_and_beyond(run_id: str) -> None:
     try:
         row = db.query(models.PipelineRun).filter_by(id=run_id).first()
         ir = json.loads(row.ir_json)
+        run_start = row.start_date or (date.today() - timedelta(days=LOOKBACK_DAYS))
+        run_end   = row.end_date or date.today()
         df, used_source = await asyncio.to_thread(
             fetch_with_source_fallback, row.symbol, row.source or "binance", row.timeframe,
-            date.today() - timedelta(days=LOOKBACK_DAYS), date.today(),
+            run_start, run_end,
         )
         if used_source != row.source:
             _save(db, row, source=used_source)
@@ -232,7 +255,12 @@ async def _run_loop_and_beyond(run_id: str) -> None:
             _save(db, row, loop_round=round_num, stage=f"loop_round_{round_num}")
             round_result = await asyncio.to_thread(run_loop_round, df, ir, capital, sim_kwargs, row.symbol, row.timeframe)
             score = round_result["score"]
-            scores.append({"round": round_num, "score": score, "metrics": round_result["metrics"]})
+            # profit_factor is +inf whenever a round has zero losing trades (all
+            # winners) — Python's json.dumps happily writes "Infinity", but
+            # FastAPI/Starlette's stricter response encoder later 500s on any
+            # endpoint that reads this row back (observed live: a DCA run with
+            # one winning trade permanently 500'd on every subsequent GET).
+            scores.append({"round": round_num, "score": score, "metrics": _sanitize_metrics(round_result["metrics"])})
             _save(db, row, composite_scores_json=json.dumps(scores))
 
             if best_score is None or score > best_score:
@@ -266,7 +294,7 @@ async def _run_loop_and_beyond(run_id: str) -> None:
         # ── Holdout (touched exactly once) ──
         _save(db, row, status="holdout", stage="holdout")
         holdout = await asyncio.to_thread(run_holdout_check, df, ir, capital, sim_kwargs)
-        _save(db, row, holdout_result_json=json.dumps(holdout))
+        _save(db, row, holdout_result_json=json.dumps(_sanitize_metrics(holdout)))
 
         # ── Kick off paper trading in the background (never blocks the report) ──
         paper_task_id = str(uuid.uuid4())
@@ -320,7 +348,7 @@ async def _run_paper_trading(run_id: str, task_id: str, ir: dict, symbol: str, t
             row = db.query(models.PipelineRun).filter_by(id=run_id).first()
             if row and row.report_json:
                 report = json.loads(row.report_json)
-                report["paper_trading_result"] = final_metrics
+                report["paper_trading_result"] = _sanitize_metrics(final_metrics)
                 for chip in report.get("chips", []):
                     if chip["id"] == "paper_trading":
                         chip["kind"] = "instant"
@@ -344,6 +372,7 @@ def retry_with_new_symbol(run_id: str, new_symbol: str) -> str:
             id=new_id, user_id=old.user_id, status="looping", stage="loop_round_1",
             ir_json=old.ir_json, symbol=new_symbol, timeframe=old.timeframe,
             source=old.source, capital=old.capital,
+            start_date=old.start_date, end_date=old.end_date,
             loop_round=0, composite_scores_json=json.dumps([]),
         )
         db.add(new_row)

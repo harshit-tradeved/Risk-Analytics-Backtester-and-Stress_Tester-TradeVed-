@@ -17,8 +17,9 @@ import pandas as pd
 
 from data.fetcher import DataFetcher, is_forex_pair
 from data.validator import DataValidator
-from engine.metrics import score_backtest
+from engine.metrics import score_backtest, score_breakdown
 from engine.validation import run_segment_backtest, run_holdout, run_walk_forward
+from engine.stress import SCENARIO_PRESETS, run_stress_backtest
 from ir_validator import validate_ir, normalize_ir
 from strategies import STRATEGY_REGISTRY
 
@@ -212,6 +213,58 @@ def run_holdout_check(df: pd.DataFrame, ir: dict[str, Any], capital: float, sim_
     return run_holdout(df, strategy_name, ir.get("params", {}), sim_kwargs, capital)
 
 
+def run_walk_forward_detail(
+    df: pd.DataFrame, ir: dict[str, Any], capital: float, sim_kwargs: dict, interval: str,
+) -> dict[str, Any]:
+    """Chip data for 'Walk-forward fold breakdown' — reuses the same engine
+    the standard /api/backtest/run walk_forward validation_mode already uses."""
+    strategy_name = ir["strategy"].upper()
+    return run_walk_forward(df, strategy_name, ir.get("params", {}), sim_kwargs, capital, interval=interval)
+
+
+# A handful of scenarios chosen for genre spread (crash/pump/vol/gap/Indian-specific)
+# rather than all 17 — keeps the on-demand chip request to a few seconds
+# (data is fetched once, then only apply_stress + one backtest per scenario).
+_STRESS_DETAIL_SCENARIOS = [
+    "gfc_2008", "covid_crash", "luna_collapse", "flash_crash_2010",
+    "slow_bleed", "pump_dump", "vol_spike", "gap_risk",
+]
+
+
+def run_stress_detail(df: pd.DataFrame, ir: dict[str, Any], capital: float, sim_kwargs: dict) -> dict[str, Any]:
+    """Chip data for 'Stress test detail' — single MC run per scenario (this
+    is a quick illustrative pass, not the full 100-run stress tester)."""
+    strategy_name = ir["strategy"].upper()
+    strategy_cls = STRATEGY_REGISTRY[strategy_name]
+    params = ir.get("params", {})
+    results = []
+    for key in _STRESS_DETAIL_SCENARIOS:
+        scenario = SCENARIO_PRESETS.get(key)
+        if scenario is None:
+            continue
+        try:
+            r = run_stress_backtest(
+                df, strategy_cls, params, sim_kwargs, capital, scenario,
+                severity=1.0, monte_carlo_runs=1,
+            )
+        except Exception as e:
+            logger.warning("Stress detail scenario %s failed: %s", key, e)
+            continue
+        baseline_ret = r.get("baseline", {}).get("total_return_pct", 0.0)
+        stressed_ret = r.get("stressed", {}).get("return_pct", 0.0)
+        delta = stressed_ret - baseline_ret
+        verdict = "SURVIVED" if delta > -5 else ("DEGRADED" if delta > -20 else "SEVERE")
+        results.append({
+            "scenario": key,
+            "display_name": scenario.display_name,
+            "baseline_return_pct": round(baseline_ret, 2),
+            "stressed_return_pct": round(stressed_ret, 2),
+            "delta_pct": round(delta, 2),
+            "verdict": verdict,
+        })
+    return {"scenarios": results}
+
+
 CHIP_DEFS = [
     {"id": "stress_detail",   "label": "Stress test detail (17 scenarios)", "kind": "instant"},
     {"id": "walk_forward",    "label": "Walk-forward fold breakdown",       "kind": "instant"},
@@ -233,7 +286,9 @@ def build_report(run: dict[str, Any]) -> dict[str, Any]:
     # "improved" round can score worse), so the report must describe the
     # BEST round's score, not blindly scores[-1]. The raw scores list is
     # left untouched so the UI can still show the full round history.
-    last_score = max((s["score"] for s in scores), default=None) if scores else None
+    best_round = max(scores, key=lambda s: s["score"], default=None) if scores else None
+    last_score = best_round["score"] if best_round else None
+    composite_breakdown = score_breakdown(best_round["metrics"]) if best_round else None
     verdict = "No rounds completed yet."
     if holdout:
         v = holdout.get("verdict", "unknown")
@@ -245,4 +300,7 @@ def build_report(run: dict[str, Any]) -> dict[str, Any]:
     elif last_score is not None:
         verdict = f"Optimization finished at composite score {last_score:.2f}; holdout check pending."
 
-    return {"verdict": verdict, "last_score": last_score, "chips": CHIP_DEFS}
+    return {
+        "verdict": verdict, "last_score": last_score, "chips": CHIP_DEFS,
+        "composite_breakdown": composite_breakdown,
+    }

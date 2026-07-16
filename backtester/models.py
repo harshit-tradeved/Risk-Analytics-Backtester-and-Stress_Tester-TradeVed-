@@ -255,6 +255,8 @@ class PipelineRun(Base):
     timeframe   = Column(String(10))
     source      = Column(String(20))          # binance | yfinance | nse | bse — data source for this run
     capital     = Column(Float)               # user-submitted capital, threaded through loop/holdout (falls back to DEFAULT_CAPITAL if unset)
+    start_date  = Column(Date)                 # OHLCV window used for the loop/holdout fetch — persisted so
+    end_date    = Column(Date)                 #   on-demand detail chips (stress/walk-forward) refetch the SAME window, not a drifted one
     source_url      = Column(String(500))
     source_platform = Column(String(20))
     source_creator  = Column(String(120))

@@ -58,6 +58,8 @@ def _ensure_columns():
             ("source", "VARCHAR(20)"),
             ("capital", "FLOAT"),
             ("disclaimer", "TEXT"),
+            ("start_date", "DATE"),
+            ("end_date", "DATE"),
         ],
     }
     with engine.connect() as conn:

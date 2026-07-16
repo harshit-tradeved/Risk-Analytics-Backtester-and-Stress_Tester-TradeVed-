@@ -100,3 +100,45 @@ def test_pipeline_checkpoint_confirm_does_not_500():
         db.query(models.PipelineRun).filter_by(id=run_id).delete()
         db.commit()
         db.close()
+
+
+def test_get_pipeline_run_sanitizes_inf_profit_factor():
+    """
+    A strategy with zero losing trades produces profit_factor = float('inf')
+    (engine/metrics.py:167). json.dumps() happily writes this as the
+    non-standard "Infinity" token into composite_scores_json, but FastAPI's
+    stricter response encoder later raises ValueError on any endpoint that
+    reads it back — permanently 500ing GET /api/pipeline/{id} for that run
+    (found live during a 15-URL batch test: a one-winning-trade DCA run
+    dead-ended every subsequent poll). pipeline_get must sanitize inf/nan
+    before returning, regardless of what got persisted.
+    """
+    from database import SessionLocal, init_db
+    import models, json, uuid
+
+    init_db()
+    db = SessionLocal()
+    run_id = str(uuid.uuid4())
+    poisoned_scores = json.dumps([{
+        "round": 1, "score": 0.5,
+        "metrics": {"profit_factor": float("inf"), "sharpe_ratio": 1.0},
+    }])
+    db.add(models.PipelineRun(
+        id=run_id, user_id="inf-regression@example.com",
+        status="complete", stage="done",
+        ir_json=json.dumps({"strategy": "DCA", "params": {}}),
+        symbol="BTC/USDT", timeframe="1d",
+        composite_scores_json=poisoned_scores,
+    ))
+    db.commit()
+    db.close()
+
+    try:
+        resp = client.get(f"/api/pipeline/{run_id}")
+        assert resp.status_code == 200
+        assert resp.json()["composite_scores"][0]["metrics"]["profit_factor"] == 9999.0
+    finally:
+        db = SessionLocal()
+        db.query(models.PipelineRun).filter_by(id=run_id).delete()
+        db.commit()
+        db.close()

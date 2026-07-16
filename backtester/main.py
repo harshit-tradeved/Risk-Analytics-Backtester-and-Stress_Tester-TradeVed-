@@ -1006,6 +1006,14 @@ def run_backtest(req: BacktestRequest, db: Session = Depends(get_db)):
         job.error_msg = str(getattr(http_exc, "detail", http_exc))[:500]
         db.commit()
         raise
+    except (ValueError, KeyError) as exc:
+        # ValueError/KeyError here means bad client input (unknown source,
+        # unknown indicator key in a CUSTOM rule, symbol/date range with no
+        # data, etc.) — a 4xx, not a server fault.
+        job.status    = "error"
+        job.error_msg = str(exc)
+        db.commit()
+        raise HTTPException(422, str(exc).strip("'\"")) from exc
     except Exception as exc:
         job.status    = "error"
         job.error_msg = str(exc)
@@ -1612,8 +1620,10 @@ def run_stress(req: StressRequest, db: Session = Depends(get_db)):
         end_dt   = datetime.combine(req.end_date,   datetime.max.time())
         df       = fetcher.fetch(req.symbol, start_dt, end_dt, req.source, req.interval,
                                  synthetic_intraday=req.synthetic_intraday)
+    except ValueError as exc:
+        raise HTTPException(422, f"Data fetch failed: {exc}") from exc
     except Exception as exc:
-        raise HTTPException(500, f"Data fetch failed: {exc}")
+        raise HTTPException(500, f"Data fetch failed: {exc}") from exc
 
     if df is None or df.empty:
         raise HTTPException(422, "No data returned for the given symbol / date range.")
@@ -1760,8 +1770,10 @@ async def stream_stress_sse(req: StressRequest, db: Session = Depends(get_db)):
             fetcher.fetch, req.symbol, start_dt, end_dt, req.source, req.interval,
             req.synthetic_intraday,
         )
+    except ValueError as exc:
+        raise HTTPException(422, f"Data fetch failed: {exc}") from exc
     except Exception as exc:
-        raise HTTPException(500, f"Data fetch failed: {exc}")
+        raise HTTPException(500, f"Data fetch failed: {exc}") from exc
 
     if df is None or df.empty:
         raise HTTPException(422, "No data returned for the given symbol / date range.")
@@ -2059,8 +2071,10 @@ def _prepare_forecast(req: ForecastRequest):
         end_dt   = datetime.combine(req.end_date,   datetime.max.time())
         df = fetcher.fetch(req.symbol, start_dt, end_dt, req.source, req.interval,
                            req.synthetic_intraday)
+    except ValueError as exc:
+        raise HTTPException(422, f"Data fetch failed: {exc}") from exc
     except Exception as exc:
-        raise HTTPException(500, f"Data fetch failed: {exc}")
+        raise HTTPException(500, f"Data fetch failed: {exc}") from exc
     if df is None or df.empty:
         raise HTTPException(422, "No data returned for the given symbol / date range.")
 
@@ -2862,7 +2876,7 @@ def pipeline_get(run_id: str, db: Session = Depends(get_db)):
     row = db.query(models.PipelineRun).filter_by(id=run_id).first()
     if row is None:
         raise HTTPException(404, "Run not found")
-    return {
+    return _sanitize({
         "id": row.id, "status": row.status, "stage": row.stage,
         "loop_round": row.loop_round, "symbol": row.symbol,
         "composite_scores": json.loads(row.composite_scores_json) if row.composite_scores_json else [],
@@ -2874,7 +2888,7 @@ def pipeline_get(run_id: str, db: Session = Depends(get_db)):
         # Stored via datetime.utcnow() (naive UTC) — clients must treat this
         # ISO string as UTC when computing elapsed time.
         "checkpoint_opened_at": row.checkpoint_opened_at.isoformat() if row.checkpoint_opened_at else None,
-    }
+    })
 
 
 @app.post(f"{API_PREFIX}/pipeline/{{run_id}}/checkpoint", tags=["Pipeline"])
@@ -2906,6 +2920,56 @@ async def pipeline_resume(run_id: str, db: Session = Depends(get_db)):
         raise HTTPException(400, f"Run is not interrupted (status={row.status})")
     pipeline_orchestrator.resume_run(run_id)
     return {"ok": True}
+
+
+def _completed_pipeline_row(run_id: str, db: Session) -> models.PipelineRun:
+    row = db.query(models.PipelineRun).filter_by(id=run_id).first()
+    if row is None:
+        raise HTTPException(404, "Run not found")
+    if row.status != "complete" or not row.ir_json:
+        raise HTTPException(400, f"Run is not complete yet (status={row.status})")
+    return row
+
+
+async def _refetch_pipeline_df(row: models.PipelineRun):
+    from orchestrator.stages import fetch_with_source_fallback
+    from orchestrator.pipeline import LOOKBACK_DAYS
+    from datetime import date, timedelta
+    start = row.start_date or (date.today() - timedelta(days=LOOKBACK_DAYS))
+    end = row.end_date or date.today()
+    try:
+        df, _ = await asyncio.to_thread(
+            fetch_with_source_fallback, row.symbol, row.source or "binance", row.timeframe, start, end,
+        )
+    except ValueError as e:
+        raise HTTPException(422, f"Could not refetch data for this run: {e}")
+    return df
+
+
+@app.get(f"{API_PREFIX}/pipeline/{{run_id}}/walk-forward", tags=["Pipeline"])
+async def pipeline_walk_forward(run_id: str, db: Session = Depends(get_db)):
+    from orchestrator.stages import run_walk_forward_detail
+    row = _completed_pipeline_row(run_id, db)
+    ir = json.loads(row.ir_json)
+    df = await _refetch_pipeline_df(row)
+    capital = row.capital or 10_000.0
+    result = await asyncio.to_thread(
+        run_walk_forward_detail, df, ir, capital, {"symbol": row.symbol}, row.timeframe or "1d",
+    )
+    return _sanitize(result)
+
+
+@app.get(f"{API_PREFIX}/pipeline/{{run_id}}/stress-detail", tags=["Pipeline"])
+async def pipeline_stress_detail(run_id: str, db: Session = Depends(get_db)):
+    from orchestrator.stages import run_stress_detail
+    row = _completed_pipeline_row(run_id, db)
+    ir = json.loads(row.ir_json)
+    df = await _refetch_pipeline_df(row)
+    capital = row.capital or 10_000.0
+    result = await asyncio.to_thread(
+        run_stress_detail, df, ir, capital, {"symbol": row.symbol},
+    )
+    return _sanitize(result)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

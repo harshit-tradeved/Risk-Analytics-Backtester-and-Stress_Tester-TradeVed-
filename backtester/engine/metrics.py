@@ -297,3 +297,40 @@ def score_backtest(metrics: dict) -> float:
             norm = 1.0 - norm
         total += weight * norm
     return round(total, 4)
+
+
+_SCORE_LABELS = {
+    "sharpe_ratio":     "Sharpe ratio",
+    "total_return_pct": "Total return",
+    "sortino_ratio":    "Sortino ratio",
+    "calmar_ratio":     "Calmar ratio",
+    "max_drawdown_pct": "Max drawdown",
+}
+
+
+def score_breakdown(metrics: dict) -> list[dict]:
+    """
+    Same weights/ranges/clamping as score_backtest, but returns the
+    per-metric working instead of collapsing straight to a scalar — lets the
+    UI show *why* a round scored what it did, not just the final number.
+    """
+    rows = []
+    for key, weight in SCORE_WEIGHTS.items():
+        lo, hi = _SCORE_RANGES[key]
+        raw = metrics.get(key)
+        if raw is None:
+            norm = 0.5
+        else:
+            clamped = max(lo, min(hi, float(raw)))
+            norm = (clamped - lo) / (hi - lo)
+            if key == "max_drawdown_pct":
+                norm = 1.0 - norm
+        rows.append({
+            "key": key,
+            "label": _SCORE_LABELS[key],
+            "weight": weight,
+            "value": raw,
+            "normalized": round(norm, 4),
+            "contribution": round(weight * norm, 4),
+        })
+    return rows
