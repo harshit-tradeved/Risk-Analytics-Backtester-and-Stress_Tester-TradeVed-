@@ -220,3 +220,66 @@ def test_normalize_ir_fixes_verbose_type_wrapper_operand_shapes():
     assert rule["operator"] == "cross_above"
     assert rule["right"] == {"indicator": "donchian", "params": {"length": 20}, "output": "dc_upper"}
     assert validate_ir(fixed) == []
+
+
+def test_normalize_ir_drops_all_null_garbage_rule_keeping_valid_siblings():
+    """
+    Found live during a 15-URL batch pipeline test: the LLM emitted
+    entry_rules[0] as a fully-null placeholder ({"operator": null, "left":
+    null, "right": null}) alongside one genuinely valid rule. Neither
+    shorthand-expansion nor key-renaming can recover intent from an
+    all-null rule — it must be dropped, not repaired, so the run can
+    proceed on the rule(s) that actually carry a signal.
+    """
+    ir = {
+        "strategy": "CUSTOM",
+        "params": {
+            "entry_rules": [
+                {"operator": None, "left": None, "right": None},
+                {"left": {"indicator": "rsi", "params": {"length": 14}}, "operator": "<", "right": {"value": 30}},
+            ],
+            "exit_rules": [{"operator": None, "left": None, "right": None}],
+            "logic": "AND",
+        },
+    }
+    fixed = normalize_ir(ir)
+    assert len(fixed["params"]["entry_rules"]) == 1
+    assert fixed["params"]["exit_rules"] == []
+    assert validate_ir(fixed) == []
+
+
+def test_normalize_ir_all_null_rules_yields_clear_error_not_crash():
+    """When every entry rule is garbage, validate_ir should give one clear
+    message — not a wall of 'operand must be a dict, got NoneType' errors."""
+    ir = {
+        "strategy": "CUSTOM",
+        "params": {"entry_rules": [{"operator": None, "left": None, "right": None}], "exit_rules": []},
+    }
+    fixed = normalize_ir(ir)
+    errors = validate_ir(fixed)
+    assert errors == ["CUSTOM strategy requires at least one entry rule"]
+
+
+def test_normalize_ir_drops_rule_with_real_operator_but_null_operands():
+    """
+    Found live during a 15-URL extensive test run: a DIFFERENT garbage shape
+    than the all-null case above — the LLM kept a real operator string (e.g.
+    "cross_above") but left both operands null. A missing operand is just as
+    unrecoverable as a missing operator, so this must be dropped too,
+    regardless of whether "operator" itself happens to be present.
+    """
+    ir = {
+        "strategy": "CUSTOM",
+        "params": {
+            "entry_rules": [
+                {"operator": "cross_above", "left": None, "right": None},
+                {"left": {"indicator": "rsi", "params": {"length": 14}}, "operator": "<", "right": {"value": 30}},
+            ],
+            "exit_rules": [{"operator": "cross_below", "left": None, "right": None}],
+            "logic": "AND",
+        },
+    }
+    fixed = normalize_ir(ir)
+    assert len(fixed["params"]["entry_rules"]) == 1
+    assert fixed["params"]["exit_rules"] == []
+    assert validate_ir(fixed) == []

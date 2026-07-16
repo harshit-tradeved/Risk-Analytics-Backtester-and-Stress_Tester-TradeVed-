@@ -230,7 +230,22 @@ def normalize_ir(ir: dict) -> dict:
     for key in ("entry_rules", "exit_rules"):
         rules = params.get(key)
         if isinstance(rules, list):
-            params[key] = [_normalize_rule(r) for r in rules]
+            normalized = [_normalize_rule(r) for r in rules]
+            # A rule missing either operand (left/right = null) carries zero
+            # signal regardless of whether "operator" itself survived — seen
+            # live in two distinct shapes: operator=null with both operands
+            # null, AND a real operator (e.g. "cross_above") paired with
+            # null/null operands. Neither shorthand-expansion nor key-renaming
+            # above can recover intent from a missing operand, so both
+            # variants get dropped here rather than repaired. This turns a
+            # wall of "operand must be a dict, got NoneType" errors into
+            # either a clean, evaluable rule set (if sibling rules are valid)
+            # or a single clear "requires at least one entry rule" from
+            # validate_ir — instead of hard-failing the run outright.
+            params[key] = [
+                r for r in normalized
+                if not (isinstance(r, dict) and (r.get("left") is None or r.get("right") is None))
+            ]
     return ir
 
 
