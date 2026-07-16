@@ -763,9 +763,11 @@ def extract_strategy_ir(transcript: str, caption: str = "") -> dict[str, Any]:
 # Unknown values become None so the frontend keeps its current selection.
 
 _SOURCE_ALIASES = {
-    "binance": "binance",
+    "binance": "binance", "crypto": "binance", "cryptocurrency": "binance",
+    "binance (crypto)": "binance", "binance spot": "binance", "binance futures": "binance",
     "yfinance": "yfinance", "yahoo": "yfinance", "yahoo finance": "yfinance",
-    "nse": "nse", "bse": "bse",
+    "yahoo finance (us stocks)": "yfinance", "stocks": "yfinance", "us stocks": "yfinance",
+    "nse": "nse", "nse (india)": "nse", "bse": "bse", "bse (india)": "bse",
 }
 _VALID_INTERVALS = {"1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w"}
 _BINANCE_QUOTES = ("USDT", "USDC", "BUSD", "BTC", "ETH")
@@ -778,14 +780,20 @@ def normalize_suggestions(symbol: Any, source: Any, interval: Any) -> tuple:
 
     sym = str(symbol).strip().upper() if symbol else None
     if sym:
-        if src == "binance" and "/" not in sym:
+        # Slash-insert crypto-style symbols even when `source` didn't match a
+        # known alias (live E2E, 2026-07-13: LLM said source="Binance (Crypto)"-
+        # like variants outside the alias table, leaving "BTCUSD" un-slashed).
+        # A bare quote-suffixed symbol is unambiguously a crypto pair regardless
+        # of how the source field was phrased, as long as it isn't NSE/BSE.
+        if src in ("binance", None) and "/" not in sym:
             # "BTCUSD" → "BTC/USDT": Binance spot has no plain-USD pairs, so a
             # trailing USD means the USDT pair; then slash off a known quote.
-            if sym.endswith("USD") and not sym.endswith("BUSD"):
-                sym = sym[:-3] + "USDT"
+            candidate = sym
+            if candidate.endswith("USD") and not candidate.endswith("BUSD"):
+                candidate = candidate[:-3] + "USDT"
             for quote in _BINANCE_QUOTES:
-                if sym.endswith(quote) and len(sym) > len(quote):
-                    sym = f"{sym[:-len(quote)]}/{quote}"
+                if candidate.endswith(quote) and len(candidate) > len(quote):
+                    sym = f"{candidate[:-len(quote)]}/{quote}"
                     break
         elif src in ("nse", "bse"):
             # Strip exchange suffixes like ".NS"/".BO" — fetcher adds its own.

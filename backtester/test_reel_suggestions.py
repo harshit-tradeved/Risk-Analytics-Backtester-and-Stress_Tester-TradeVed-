@@ -11,6 +11,16 @@ def test_live_e2e_case_btcusd_binance():
     assert (sym, src, itv) == ("BTC/USDT", "binance", "1d")
 
 
+def test_live_e2e_case_unrecognized_source_variant_still_slashes_symbol():
+    """Live UI testing (2026-07-13): LLM said source="Binance (Crypto)"-style
+    text outside the alias table; symbol slash-insertion must not depend on
+    the source string parsing cleanly — a bare quote-suffixed symbol is
+    unambiguously crypto regardless of source phrasing."""
+    sym, src, _ = normalize_suggestions("BTCUSD", "some future crypto exchange", "1d")
+    assert sym == "BTC/USDT"
+    assert src is None  # unknown source alias still degrades to None
+
+
 def test_binance_symbol_variants():
     assert normalize_suggestions("ethusdt", "binance", None)[0] == "ETH/USDT"
     assert normalize_suggestions("SOLUSDC", "Binance", None)[0] == "SOL/USDC"
