@@ -535,7 +535,9 @@ const STATUS_BADGE: Record<string, string> = {
 };
 
 export default function PipelinePage({ userId }: { userId: string }) {
+  const [inputMode, setInputMode] = useState<"transcript" | "url">("transcript");
   const [transcript, setTranscript] = useState("");
+  const [url, setUrl] = useState("");
   const [tweak, setTweak] = useState("");
   const [symbol, setSymbol] = useState("BTC/USDT");
   const [runId, setRunId] = useState<string | null>(() => loadStoredRunId(userId));
@@ -588,7 +590,13 @@ export default function PipelinePage({ userId }: { userId: string }) {
   const handleStart = async () => {
     setError(null);
     try {
-      const { run_id } = await startPipeline({ user_id: userId, transcript, tweak: tweak || undefined, symbol });
+      const { run_id } = await startPipeline({
+        user_id: userId,
+        transcript: inputMode === "transcript" ? transcript : undefined,
+        url: inputMode === "url" ? url : undefined,
+        tweak: tweak || undefined,
+        symbol,
+      });
       adoptRun(run_id);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -605,6 +613,8 @@ export default function PipelinePage({ userId }: { userId: string }) {
     setWalkForward(null);
     setStressDetail(null);
     setChipError(null);
+    setTranscript("");
+    setUrl("");
   };
 
   const handleConfirm = async () => {
@@ -663,16 +673,46 @@ export default function PipelinePage({ userId }: { userId: string }) {
 
       {!runId && (
         <div className="space-y-3">
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Strategy transcript</label>
-            <textarea
-              className="w-full border border-gray-200 rounded-lg p-2 text-sm focus:outline-none focus:border-indigo-400"
-              rows={6}
-              placeholder="Paste a transcript describing a trading strategy..."
-              value={transcript}
-              onChange={(e) => setTranscript(e.target.value)}
-            />
+          <div className="flex gap-1 bg-gray-100 rounded-full p-1 w-fit">
+            {(["transcript", "url"] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setInputMode(m)}
+                className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all ${
+                  inputMode === m ? "bg-white text-indigo-600 shadow-sm" : "text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                {m === "transcript" ? "📝 Paste Transcript" : "🔗 Paste URL"}
+              </button>
+            ))}
           </div>
+
+          {inputMode === "url" ? (
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Reel / Video URL</label>
+              <input
+                className="w-full border border-gray-200 rounded-lg p-2 text-sm focus:outline-none focus:border-indigo-400"
+                placeholder="https://www.youtube.com/watch?v=... or https://www.instagram.com/reel/..."
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+              />
+              <p className="text-xs text-gray-400 mt-1">
+                Downloads the video, transcribes it, and extracts the strategy automatically.
+              </p>
+            </div>
+          ) : (
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Strategy transcript</label>
+              <textarea
+                className="w-full border border-gray-200 rounded-lg p-2 text-sm focus:outline-none focus:border-indigo-400"
+                rows={6}
+                placeholder="Paste a transcript describing a trading strategy..."
+                value={transcript}
+                onChange={(e) => setTranscript(e.target.value)}
+              />
+            </div>
+          )}
+
           <div>
             <label className="block text-xs text-gray-500 mb-1">Tweak (optional)</label>
             <input
@@ -693,7 +733,7 @@ export default function PipelinePage({ userId }: { userId: string }) {
           </div>
           <button
             className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-default"
-            disabled={!transcript.trim()}
+            disabled={inputMode === "transcript" ? !transcript.trim() : !url.trim()}
             onClick={handleStart}
           >
             Run pipeline
