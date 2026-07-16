@@ -51,6 +51,20 @@ Paste the transcript (or URL) of any trading reel. An LLM extracts the claimed s
 
 ![Reel Backtest — paste a transcript, get an extracted and backtested strategy](docs/screenshots/reel-backtest.png)
 
+### Unified Pipeline — paste a URL, get the whole research loop automatically
+
+Paste a transcript **or a YouTube/Instagram URL directly** (the server downloads, transcribes, and extracts it for you) and the entire extraction → review → optimize → holdout → paper-trading loop runs as one resumable job, with a 5-step progress tracker and a review checkpoint that auto-proceeds if you walk away:
+
+![Full Pipeline URL input — paste a video link, no manual transcript needed](docs/screenshots/pipeline-url-input.png)
+
+Once complete, five result chips give a full audit trail: the round-by-round optimization history (best round always highlighted), the out-of-sample verdict, a **composite score breakdown**, a **walk-forward fold-by-fold table**, an **8-scenario stress check**, and the background **paper-trading** result:
+
+![Full Pipeline results — round history, holdout verdict, and result chips](docs/screenshots/pipeline-results.png)
+
+Every chip expands in place — for example, the composite score math shows exactly how much each of the five weighted metrics contributed to the final score:
+
+![Composite score math — per-metric weight and contribution breakdown](docs/screenshots/pipeline-composite-math.png)
+
 ---
 
 ## 🏆 Why This Project Stands Out
@@ -122,21 +136,23 @@ The IR editor in the UI lets power users inspect and tweak the extracted rules b
 
 ### 4. Unified Pipeline — one-click orchestrator (🔁 Full Pipeline tab)
 
-The newest surface: paste a transcript and the server runs the *entire* research loop as a resumable state machine, with one human checkpoint.
+The newest surface: paste a transcript **or a video URL** and the server runs the *entire* research loop as a resumable state machine, with one human checkpoint.
 
 ```mermaid
 flowchart LR
-    A[📝 Transcript + optional tweak] --> B[🤖 Extract IR]
+    A[📝 Transcript or 🔗 URL + optional tweak] --> B[🤖 Extract IR]
     B --> C[🙋 Review checkpoint<br/>confirm / free-text tweak<br/>auto-proceeds in 60–100s]
     C --> D[🔄 Optimization loop ≤5 rounds<br/>backtest → composite score → LLM critique]
     D --> E{Plateau or cap?}
     E -- worse round --> F[↩️ Revert to best-scoring IR]
     E --> F
     F --> G[🧪 Out-of-sample holdout<br/>70/30 split → stable / degraded / failed]
-    G --> H[📋 Verdict + round history<br/>paper trading kicks off in background]
+    G --> H[📋 Verdict + round history<br/>+ composite math / walk-forward / stress / paper-trading chips]
 ```
 
-Engineering details worth noting: runs survive backend restarts (a sweep loop detects orphaned tasks and marks them resumable); the browser survives refreshes (run id persisted client-side, polling resumes); the checkpoint is a real timer, not a modal — walk away and the pipeline proceeds with the extracted strategy; and if an LLM "improvement" round *regresses* the composite score, the pipeline reverts to the best-scoring strategy before the holdout so the final verdict always describes the best round, not the last one.
+Engineering details worth noting: runs survive backend restarts (a sweep loop detects orphaned tasks and marks them resumable); the browser survives refreshes (run id persisted client-side, polling resumes); the checkpoint is a real timer, not a modal — walk away and the pipeline proceeds with the extracted strategy; and if an LLM "improvement" round *regresses* the composite score, the pipeline reverts to the best-scoring strategy before the holdout so the final verdict always describes the best round, not the last one. Five result chips back the verdict with real data: composite score breakdown, walk-forward fold-by-fold table, an 8-scenario stress pass, background paper trading, and one-click retry on another symbol.
+
+Validated across an extensive live-URL batch test this session: 15 real YouTube videos run through the full pipeline end-to-end (real yt-dlp download → Whisper transcription → LLM extraction → optimize → holdout → paper trading), averaging ~112s per URL. Two real bugs were found and fixed in the process: a strategy with zero losing trades produced `profit_factor = +infinity`, which crashed every subsequent status poll for that run (now sanitized at both write- and read-time); and the LLM occasionally emitted rules with missing operator/operand values, which used to hard-fail the whole run instead of just dropping the unusable rule.
 
 ### 5. AI Forward Test
 
@@ -172,7 +188,7 @@ flowchart LR
 - **Kronos** foundation-model price forecasting served from Modal with concurrent batch generation (100 paths ≈ 2 s)
 - **Crisis Sim** (stress scenarios on generated futures) and **Paper Trade** (bar-by-bar forward simulation) modes
 - Reel → Backtest pipeline with confidence scoring, honest rejection of non-testable reels, and an AI improvement agent that **actually re-runs** the improved strategy and shows an original-vs-improved diff table audited by a judge LLM — no fabricated numbers
-- **Unified Pipeline orchestrator:** transcript → extraction → human checkpoint (60–100s auto-proceed) → ≤5-round optimize-critique loop with best-IR revert → out-of-sample holdout → verdict, resumable across backend restarts and browser refreshes
+- **Unified Pipeline orchestrator:** transcript or URL → extraction → human checkpoint (60–100s auto-proceed) → ≤5-round optimize-critique loop with best-IR revert → out-of-sample holdout → verdict + composite math / walk-forward / stress / paper-trading chips, resumable across backend restarts and browser refreshes
 
 ---
 
@@ -205,8 +221,8 @@ flowchart LR
 ## 🚀 Quick Start
 
 ```bash
-git clone https://github.com/HarshitK2814/Backtester-and-Risk-Analytics.git
-cd Backtester-and-Risk-Analytics
+git clone https://github.com/harshit-tradeved/Risk-Analytics-Backtester-and-Stress_Tester-TradeVed-.git
+cd Risk-Analytics-Backtester-and-Stress_Tester-TradeVed-
 
 # Backend
 python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
@@ -251,7 +267,7 @@ backtester/
 ├── ir_validator.py         # IR schema validation + deterministic LLM-drift auto-repair
 ├── improvement_agent.py    # AI strategy-improvement suggestions
 ├── ingestion.py            # Reel/video ingestion (yt-dlp, captions)
-├── test_all.py             # 44-test pytest suite (+16 normalizer/suggestion/orchestrator tests alongside)
+├── test_all.py             # 44-test pytest suite (118 total across all test_*.py + orchestrator/test_*.py)
 ├── stress_validation.py    # 207-test stress validation
 └── frontend/               # React 18 + Vite + TS + Tailwind
     └── src/components/     # Canvas MC charts, RuleBuilder, StressPage, ReelPage…
@@ -269,7 +285,7 @@ Deeper dives: [ARCHITECTURE.md](ARCHITECTURE.md) · [TECHNICAL_DOCUMENTATION.md]
 - **Performance where it matters:** the SSE endpoint offloads every blocking backtest to `asyncio.to_thread` so events flush between iterations; the MC chart is raw Canvas with incremental drawing and devicePixelRatio scaling — the previous SVG chart died at ~100 paths, this one handles 1000+; Kronos inference is batched and dispatched concurrently (100 paths ≈ 2 s).
 - **Extensibility by design:** strategies self-describe via `parameter_schema()` and the frontend renders forms from `/api/strategies` — the 52 indicator presets shipped with **zero** frontend changes.
 - **No fragile TA dependencies:** every indicator implemented from scratch in pure pandas/numpy, with SMA-seeded Wilder smoothing that matches textbook RSI/ATR/ADX values (verified in tests).
-- **Tested like a product, not a demo:** 60+ unit/integration tests (core engine, IR normalizer drift cases, suggestion coercion, orchestrator loop/holdout logic) + a 207-combination automated stress-validation matrix, plus recorded live E2E passes through the real UI with real LLM and market data.
+- **Tested like a product, not a demo:** 118 unit/integration tests (core engine, IR normalizer drift cases, suggestion coercion, orchestrator loop/holdout logic) + a 207-combination automated stress-validation matrix + an extensive 15-URL live batch test through the real ingestion→LLM→backtest→holdout pipeline, plus recorded live E2E passes through the real UI with real LLM and market data.
 - **LLM output treated as untrusted input:** every shape of extraction drift observed in live runs (string rules, key renames, nested operands, mis-cased symbols) gets a deterministic auto-repair with a regression test — the model proposes, the validator disposes.
 
 ---

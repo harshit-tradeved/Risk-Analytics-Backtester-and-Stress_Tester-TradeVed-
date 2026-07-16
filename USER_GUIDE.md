@@ -86,6 +86,28 @@ Have a video from Instagram or YouTube with a strategy?
 
 ---
 
+### 3.4 Step 4: The Full Pipeline — one click, the whole research loop
+
+If you don't want to babysit each step, the **🔁 Full Pipeline** tab runs the entire process automatically — extraction, review, optimization, out-of-sample check, and paper trading — as one resumable job.
+
+1. Go to the **🔁 Full Pipeline** tab.
+2. Choose **📝 Paste Transcript** or **🔗 Paste URL** (paste a YouTube/Instagram link and the server downloads and transcribes it for you — no manual transcript needed).
+3. Optionally add a **Tweak** (e.g. *"use a faster EMA"*) and a **Symbol** (defaults to `BTC/USDT`).
+4. Click **Run pipeline**. A 5-step progress bar tracks you through Extracting → Review checkpoint → Optimizing → Out-of-sample check → Done.
+5. At the **Review checkpoint**, you'll see the extracted rules in plain English. You can **Confirm** immediately, type a free-text tweak and apply it, or just walk away — it auto-proceeds after 60–100 seconds so you're never stuck waiting on yourself.
+6. The optimizer runs up to 5 rounds, each one backtesting the strategy and having an AI critique try to improve it. If a later round scores *worse*, the pipeline automatically reverts to the best-scoring round before continuing — the "Optimization Rounds" table always highlights the round actually used, tagged **BEST**.
+7. An out-of-sample **holdout check** (70% train / 30% test) then tells you if the results are **stable** (held up), **degraded** (weakened out-of-sample), or **failed** (likely overfit).
+8. Once done, five result chips appear:
+   - **Composite score math** — see exactly how the final score breaks down (Sharpe 35% + Return 25% + Sortino 20% + Calmar 10% + Max Drawdown 10%), with each metric's raw value, weight, and contribution.
+   - **Walk-forward fold breakdown** — re-runs a rolling train/test split so you can see performance fold-by-fold, not just as one aggregate number.
+   - **Stress test detail (17 scenarios)** — a quick pass of the strategy through 8 representative historical crashes/crises to see how it would have held up.
+   - **Paper trading** — a forward-looking simulation result (runs automatically in the background after the holdout check).
+   - **Try this on another symbol** — re-runs the exact same strategy on a different symbol without repeating extraction.
+
+If you refresh the page or come back later, the run picks up right where it left off — your progress is never lost.
+
+---
+
 ## 4. How to Read Your Results (Without a Finance Degree)
 
 When your backtest finishes, you are presented with a **Metrics Grid** and a **Plain Language Verdict**. Here is how to read them:
@@ -154,3 +176,9 @@ During Stress Tests or Forward Tests, the platform streams a "spaghetti chart" o
 
 ### Q: What is the "Circular Block Bootstrap" fallback?
 *   If our AI engine (Kronos) is sleeping or undergoing maintenance, TradeVed automatically swaps in a mathematical bootstrap. It takes blocks of historical data and pieces them together randomly. This ensures you still get 100 realistic future paths without relying on a cloud server.
+
+### Q: My Full Pipeline / Reel run says "could not extract a runnable strategy" — why?
+*   Not every video describes a concrete, testable rule. A video that's purely motivational ("just believe in yourself and trade smart!") or a comparison piece ("DCA vs lump-sum — which is better?") has nothing a backtester can execute — there's no specific entry/exit condition to simulate. This is an honest rejection, not a bug: the platform would rather tell you "there's nothing testable here" than fabricate a strategy that was never actually described.
+
+### Q: The video downloaded but extraction failed anyway — what happened?
+*   Occasionally the AI produces a malformed rule (e.g. a rule missing its comparison operator or values). TradeVed automatically drops any rule it can't interpret and keeps the ones that are valid — so a strategy with one bad rule and one good rule still runs. If *every* rule in the video turns out to be unusable, you'll get one clear message ("CUSTOM strategy requires at least one entry rule") instead of a wall of technical errors.
