@@ -226,56 +226,96 @@ cd Risk-Analytics-Backtester-and-Stress_Tester-TradeVed-
 
 # Backend
 python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
-pip install -r backtester/requirements.txt
+pip install -r requirements.txt                    # root file includes backtester/requirements.txt
 cp backtester/.env.example backtester/.env         # all keys optional — runs on Binance/yfinance without any
 cd backtester && python main.py                    # FastAPI on :8000
 
-# Frontend (second terminal)
-cd backtester/frontend
-npm install && npm run dev -- --port 5173          # UI on :5173
+# Frontend (second terminal — note: npm install at the REPO ROOT, not backtester/frontend)
+npm install                                        # workspaces root — hoists node_modules to the repo root
+cd backtester/frontend && npm run dev -- --port 5173   # UI on :5173
 ```
 
 - **UI:** http://localhost:5173 · **Swagger:** http://localhost:8000/docs
 
-Run the test suites:
+Run the test suite:
 
 ```bash
 cd backtester
-python -m pytest test_all.py -v        # 37 unit/integration tests
-python stress_validation.py           # 207 stress-scenario validations (backend must be running)
+python -m pytest -v        # 119 unit/integration tests — engine, stress, pipeline, extraction
 ```
 
 ---
 
-## 🗂️ Repo Map
+## 🗂️ Repo Map — one folder per project
+
+The codebase is organized as **six top-level project folders**, each containing that project's `backend/` (Python) and `frontend/` (React components). The shared application shell — the FastAPI app with every project's routes, the database, the Pydantic schemas, the full test suite, and the Vite app — lives in `backtester/`.
 
 ```
-backtester/
-├── main.py                 # FastAPI app — all routes, SSE streaming, orchestration
-├── engine/
-│   ├── simulator.py        # WACB trade simulator, partial fills, lot sizes
-│   ├── cost_models.py      # IndianCostModel (Budget 2024) + SimpleCostModel
-│   ├── indicators.py       # 25-indicator pure pandas/numpy engine (40 output series)
-│   ├── metrics.py          # Sharpe / Sortino / Calmar / MDD / PF
-│   ├── regimes.py          # Timeframe-aware regime detection
-│   ├── validation.py       # Hold-out & walk-forward validation
-│   └── stress.py           # 17 scenario presets, MC aggregation, robustness scoring
-├── strategies/             # GRID · DCA · PLA · 52 indicator presets · rule-builder
-├── orchestrator/           # Unified pipeline: stages, task runner, checkpoint sweep, cache
-├── data/                   # Binance / CoinGecko / yfinance fetchers, NSE/BSE assets
-├── reel_to_backtest/backend/reel_extractor.py       # Reel transcript → strategy IR (LLM) + suggestion normalization
-├── reel_to_backtest/backend/ir_validator.py         # IR schema validation + deterministic LLM-drift auto-repair
-├── reel_to_backtest/backend/improvement_agent.py    # AI strategy-improvement suggestions
-├── reel_to_backtest/backend/ingestion.py            # Reel/video ingestion (yt-dlp, captions)
-├── test_all.py             # 44-test pytest suite (118 total across all test_*.py + orchestrator/test_*.py)
-├── stress_validation.py    # 207-test stress validation
-└── frontend/               # React 18 + Vite + TS + Tailwind
-    └── src/components/     # Canvas MC charts, RuleBuilder, StressPage, ReelPage…
-forward_testing/kronos_service/             # Kronos foundation-model forecasting (Modal deployment)
+backtesting/                # PROJECT 1 — core backtest engine
+├── backend/
+│   ├── engine/             # simulator.py (WACB, partial fills, lot sizes) · cost_models.py
+│   │                       #   (IndianCostModel, Budget 2024) · indicators.py (25-indicator pure
+│   │                       #   pandas/numpy engine) · metrics.py · regimes.py · validation.py
+│   ├── strategies/         # GRID · DCA · PLA · 52 indicator presets · rule-builder
+│   ├── data/               # Binance / CoinGecko / yfinance fetchers, NSE/BSE assets
+│   └── reporting/          # Plotly charts + HTML report generator
+└── frontend/               # Sidebar, MetricsGrid, TradeLog, ChartsPanel, RegimeBreakdown, ValidationPanel
+
+stress_testing/             # PROJECT 2 — crisis stress tester
+├── backend/stress.py       # 17 scenario presets, MC engine, robustness scoring
+└── frontend/               # StressPage, StressSidebar, StressResults, MCPathsCanvas
+
+forward_testing/            # PROJECT 3 — AI forward testing
+├── backend/forecast.py     # KronosClient + block-bootstrap path generation
+├── kronos_service/         # Kronos foundation model on Modal GPU (separate deployment)
+└── frontend/               # ForwardTestPage, ForwardTestSidebar, ForwardTestResults
+
+paper_trading/              # PROJECT 4 — bar-by-bar live paper trading
+└── frontend/PaperTradeView.tsx    # (routes live in the shared main.py — see its README)
+
+reel_to_backtest/           # PROJECT 5 — reel/video → strategy extraction
+├── backend/                # ingestion.py (yt-dlp/Whisper) · reel_extractor.py (LLM IR extraction)
+│                           #   · ir_validator.py (drift auto-repair) · improvement_agent.py
+└── frontend/               # ReelPage, StrategyIREditor, PlainLanguageVerdict, StrategyImprovement
+
+reel_to_pipeline/           # PROJECT 6 — unified pipeline orchestrator
+├── backend/                # pipeline.py (checkpoint/loop/best-IR revert) · stages.py · cache.py
+└── frontend/PipelinePage.tsx
+
+backtester/                 # SHARED APP SHELL — the server runs from here
+├── main.py                 # FastAPI app: ALL projects' routes, SSE streaming, orchestration
+├── config.py · database.py · models.py
+├── test_*.py · conftest.py # full 119-test pytest suite
+└── frontend/               # Vite app shell (App.tsx, api.ts, types.ts) + shared components
+                            #   (IdentityGate, FeedbackWidget, AdminDashboard, StrategyParamsForm, RuleBuilder)
+
 docs/screenshots/           # The screenshots used in this README
 ```
 
-Deeper dives: [ARCHITECTURE.md](ARCHITECTURE.md) · [TECHNICAL_DOCUMENTATION.md](TECHNICAL_DOCUMENTATION.md) · [USER_GUIDE.md](USER_GUIDE.md) · [PRD.md](PRD.md) · [ROADMAP.md](ROADMAP.md)
+Each project also has its own private documentation repo (same `backend/`/`frontend/` split, with per-project READMEs and screenshots): `tradeved-backtesting`, `tradeved-stress-testing`, `tradeved-forward-testing`, `tradeved-paper-trading`, `tradeved-reel-to-backtest`, `tradeved-reel-to-pipeline` — this combined repo is the only one with runnable, deployed code.
+
+Deeper dives: [ARCHITECTURE.md](ARCHITECTURE.md) · [TECHNICAL_DOCUMENTATION.md](TECHNICAL_DOCUMENTATION.md) · [USER_GUIDE.md](USER_GUIDE.md) · [PRD.md](PRD.md) · [ROADMAP.md](ROADMAP.md) · [DEPLOYMENT.md](DEPLOYMENT.md)
+
+---
+
+## ⚠️ Important Instructions & Disclaimers
+
+**Development rules (breaking these breaks the build):**
+- **`npm install` runs at the repo root only** — the root `package.json` is an npm-workspaces root that hoists `node_modules` so the per-project `frontend/` folders (which live outside the Vite app) can resolve React and friends. Running `npm install` inside `backtester/frontend/` recreates a nested `node_modules` + lockfile and breaks that resolution.
+- **Python imports follow `<project>.backend.<module>`** — e.g. `from backtesting.backend.engine.simulator import TradeSimulator`, `from stress_testing.backend.stress import run_stress_backtest`. Shared modules keep bare imports (`from database import …`) and resolve because the server and tests run from `backtester/`.
+- **Frontend imports use aliases** (`@backtesting`, `@stress`, `@forward`, `@paper`, `@reelbt`, `@reelpipe`, `@app`) defined in `vite.config.ts` + `tsconfig.json`. If you add a new project folder, you must also add it to the **Tailwind `content` globs** in `tailwind.config.js` — otherwise its CSS classes are silently purged from the production build.
+- `forward_testing/kronos_service/Kronos/` is a vendored third-party model clone and is deliberately untracked/gitignored.
+
+**Deployment (see [DEPLOYMENT.md](DEPLOYMENT.md) for the full guide):**
+- Both the **Railway** (backend) and **Vercel** (frontend) services must have **Root Directory set to the repo root** (empty). Older setups pointing at `backtester` / `backtester/frontend` will fail after the per-project restructure because the project folders live at the repo root.
+- The root `railway.json` + `Procfile` + `nixpacks.toml` drive the backend deploy (`cd backtester && python main.py`); `nixpacks.toml` pins the Python provider so the root `package.json` doesn't get misdetected as a Node app. The root `vercel.json` drives the frontend (`npm install` at root → build in `backtester/frontend`).
+- A Railway **volume mounted at `/data`** with `DATABASE_URL=sqlite:////data/backtester.db` is required, or all data is wiped on every redeploy.
+
+**Usage disclaimers:**
+- **Not financial advice.** This platform is an educational/research tool. Backtested, stress-tested, forward-tested, and paper-traded results are simulations — they do not guarantee future performance, and real trading involves costs, slippage, and risks the simulator can only approximate. Do not make investment decisions based solely on its output.
+- **AI-generated content can be wrong.** Strategy extraction, critique, and improvement suggestions come from LLMs; every output is validated and re-run through the real engine before display, but treat verdicts as analysis aids, not recommendations.
+- **Market data** comes from third-party sources (Binance, CoinGecko, yfinance, NSE/BSE feeds) and is subject to their availability, accuracy, and terms of service. Indian cost calculations use Budget 2024 rates and may drift from current regulations.
+- Reel/video ingestion is for analyzing content the user has legitimate access to; respect the source platforms' terms of service.
 
 ---
 
