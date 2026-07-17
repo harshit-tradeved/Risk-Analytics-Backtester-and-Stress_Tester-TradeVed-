@@ -17,9 +17,14 @@ Deploy the **backend first** — you need its public URL before you can configur
 1. Go to [railway.app](https://railway.app) → **New Project** → **Deploy from GitHub repo**
 2. Select `harshit-tradeved/Risk-Analytics-Backtester-and-Stress_Tester-TradeVed-`
 3. After it imports, open the service → **Settings**:
-   - **Root Directory:** `backtester`
-   - Build/start are auto-detected from `backtester/railway.json` + `Procfile`
-     (`python main.py`, which binds to Railway's `$PORT`)
+   - **Root Directory:** *(leave empty — repo root)*. Since the July 2026 per-project
+     restructure, the six project packages (`backtesting/`, `stress_testing/`, …) live at
+     the repo root, so the build must include the whole repo. **If an existing service has
+     Root Directory set to `backtester`, clear it** or the server will crash on import.
+   - Build/start are auto-detected from the root `railway.json` + `Procfile` + `nixpacks.toml`
+     (`cd backtester && python main.py`, which binds to Railway's `$PORT`; `nixpacks.toml`
+     pins the Python provider so the root `package.json` — which exists only for npm
+     workspace hoisting — doesn't make Nixpacks build it as a Node app)
 
 ### 2. Add a Volume (CRITICAL — without this all data is wiped on every redeploy)
 1. Service → **Variables / Volumes** → **+ New Volume**
@@ -53,9 +58,13 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"
 ### 1. Create the project
 1. Go to [vercel.com](https://vercel.com) → **Add New → Project** → import the same GitHub repo
 2. Configure:
-   - **Root Directory:** `backtester/frontend`
-   - **Framework Preset:** Vite (auto-detected via `vercel.json`)
-   - Build command / output dir are set in `vercel.json` (`npm run build` → `dist`)
+   - **Root Directory:** *(leave empty — repo root)*. The per-project `frontend/` folders
+     live at the repo root and are imported by the Vite app via aliases, so the build needs
+     the whole repo. **If an existing project has Root Directory set to `backtester/frontend`,
+     clear it** or those imports won't resolve.
+   - **Framework Preset:** Other (the root `vercel.json` drives everything)
+   - `vercel.json`: install runs `npm install` at the root (workspace hoisting), build runs
+     `cd backtester/frontend && npm run build`, output is `backtester/frontend/dist`
 
 ### 2. Set the environment variable
 Project → **Settings → Environment Variables** → add:

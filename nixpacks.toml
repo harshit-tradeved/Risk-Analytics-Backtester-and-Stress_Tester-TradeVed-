@@ -1,0 +1,6 @@
+# Force the Python provider (a root package.json exists only for npm workspace
+# hoisting of the frontend — the Railway service is the Python backend).
+providers = ["python"]
+
+[start]
+cmd = "cd backtester && python main.py"
