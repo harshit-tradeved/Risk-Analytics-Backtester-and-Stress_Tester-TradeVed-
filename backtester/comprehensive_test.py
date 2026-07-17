@@ -38,6 +38,14 @@ Output:
 """
 from __future__ import annotations
 
+# Project packages live at the repo root (one folder per project); make them importable.
+import sys as _sys
+from pathlib import Path as _Path
+_repo_root = str(_Path(__file__).resolve().parent.parent)
+if _repo_root not in _sys.path:
+    _sys.path.insert(1, _repo_root)
+
+
 import argparse
 import logging
 import sys
@@ -60,16 +68,16 @@ if hasattr(sys.stdout, "reconfigure"):
 HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE))
 
-from backtesting.data.fetcher import DataFetcher
-from backtesting.data.validator import DataValidator
-from backtesting.data.indian_assets import is_indian, get_lot_size
-from backtesting.engine.simulator import TradeSimulator
-from backtesting.engine.metrics import calculate_metrics
-from backtesting.engine.regimes import classify_regimes
-from stress_testing import stress as stress_engine
-from forward_testing import forecast as forecast_engine
-from backtesting.engine.indicators import INDICATOR_CATALOG, compute
-from backtesting.strategies import STRATEGY_REGISTRY
+from backtesting.backend.data.fetcher import DataFetcher
+from backtesting.backend.data.validator import DataValidator
+from backtesting.backend.data.indian_assets import is_indian, get_lot_size
+from backtesting.backend.engine.simulator import TradeSimulator
+from backtesting.backend.engine.metrics import calculate_metrics
+from backtesting.backend.engine.regimes import classify_regimes
+from stress_testing.backend import stress as stress_engine
+from forward_testing.backend import forecast as forecast_engine
+from backtesting.backend.engine.indicators import INDICATOR_CATALOG, compute
+from backtesting.backend.strategies import STRATEGY_REGISTRY
 
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side

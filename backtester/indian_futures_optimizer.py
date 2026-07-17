@@ -36,6 +36,14 @@ Output:
 """
 from __future__ import annotations
 
+# Project packages live at the repo root (one folder per project); make them importable.
+import sys as _sys
+from pathlib import Path as _Path
+_repo_root = str(_Path(__file__).resolve().parent.parent)
+if _repo_root not in _sys.path:
+    _sys.path.insert(1, _repo_root)
+
+
 import argparse
 import csv
 import math
@@ -59,15 +67,15 @@ HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE))
 
 import logging
-from backtesting.data.fetcher import DataFetcher
-from backtesting.data.validator import DataValidator
-from backtesting.data.indian_assets import get_lot_size, INDEX_MAP, to_yf_symbol
-from backtesting.engine.simulator import TradeSimulator
-from backtesting.engine.metrics import calculate_metrics
-from backtesting.engine.cost_models import IndianCostModel
-from backtesting.strategies.grid import GridStrategy
-from backtesting.strategies.dca import DCAStrategy
-from backtesting.strategies.pla import PLAStrategy
+from backtesting.backend.data.fetcher import DataFetcher
+from backtesting.backend.data.validator import DataValidator
+from backtesting.backend.data.indian_assets import get_lot_size, INDEX_MAP, to_yf_symbol
+from backtesting.backend.engine.simulator import TradeSimulator
+from backtesting.backend.engine.metrics import calculate_metrics
+from backtesting.backend.engine.cost_models import IndianCostModel
+from backtesting.backend.strategies.grid import GridStrategy
+from backtesting.backend.strategies.dca import DCAStrategy
+from backtesting.backend.strategies.pla import PLAStrategy
 
 # Silence internal loggers
 for _ns in ("data", "strategies", "engine", "frontend", ""):

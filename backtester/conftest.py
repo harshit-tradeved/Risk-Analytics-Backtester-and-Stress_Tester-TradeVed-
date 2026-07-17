@@ -10,6 +10,13 @@ separate rounds of flaky pipeline test failures. Setting DATABASE_URL here,
 before any test module imports config/database, means pytest always gets a
 private DB file regardless of what else is running.
 """
+# Project packages live at the repo root (one folder per project); make them importable.
+import sys as _sys
+from pathlib import Path as _Path
+_repo_root = str(_Path(__file__).resolve().parent.parent)
+if _repo_root not in _sys.path:
+    _sys.path.insert(1, _repo_root)
+
 import os
 import tempfile
 

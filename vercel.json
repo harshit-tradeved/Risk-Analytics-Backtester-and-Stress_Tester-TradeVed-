@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "installCommand": "cd backtester/frontend && npm install",
+  "installCommand": "npm install",
   "buildCommand": "cd backtester/frontend && npm run build",
   "outputDirectory": "backtester/frontend/dist",
   "framework": null,

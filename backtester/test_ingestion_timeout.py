@@ -12,7 +12,7 @@ def test_pipeline_start_times_out_instead_of_hanging(monkeypatch):
         time.sleep(2)
         return {"transcript": "should never get here"}
 
-    monkeypatch.setattr("reel_to_backtest.ingestion.handle_url", _slow_handle_url)
+    monkeypatch.setattr("reel_to_backtest.backend.ingestion.handle_url", _slow_handle_url)
     monkeypatch.setattr(main, "INGESTION_TIMEOUT_SECS", 0.3)
 
     resp = client.post("/api/pipeline/start", json={
@@ -28,7 +28,7 @@ def test_reel_analyze_times_out_instead_of_hanging(monkeypatch):
         time.sleep(2)
         return {"transcript": "should never get here"}
 
-    monkeypatch.setattr("reel_to_backtest.ingestion.handle_url", _slow_handle_url)
+    monkeypatch.setattr("reel_to_backtest.backend.ingestion.handle_url", _slow_handle_url)
     monkeypatch.setattr(main, "INGESTION_TIMEOUT_SECS", 0.3)
 
     resp = client.post("/api/reel/analyze", json={

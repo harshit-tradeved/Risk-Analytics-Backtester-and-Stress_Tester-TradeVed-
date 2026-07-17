@@ -1,4 +1,4 @@
-from backtesting.engine.metrics import score_backtest
+from backtesting.backend.engine.metrics import score_backtest
 
 
 def test_score_backtest_weights_and_bounds():
@@ -44,7 +44,7 @@ def test_pipeline_run_roundtrip():
 
 
 def test_run_segment_backtest_alias_exists():
-    from backtesting.engine.validation import run_segment_backtest, _segment_metrics
+    from backtesting.backend.engine.validation import run_segment_backtest, _segment_metrics
     assert run_segment_backtest is _segment_metrics
 
 

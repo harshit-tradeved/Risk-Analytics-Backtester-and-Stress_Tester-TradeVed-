@@ -14,7 +14,25 @@
     "strict": false,
     "noUnusedLocals": false,
     "noUnusedParameters": false,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@app/*":         ["src/*"],
+      "@backtesting/*": ["../../backtesting/frontend/*"],
+      "@stress/*":      ["../../stress_testing/frontend/*"],
+      "@forward/*":     ["../../forward_testing/frontend/*"],
+      "@paper/*":       ["../../paper_trading/frontend/*"],
+      "@reelbt/*":      ["../../reel_to_backtest/frontend/*"],
+      "@reelpipe/*":    ["../../reel_to_pipeline/frontend/*"]
+    }
   },
-  "include": ["src"]
+  "include": [
+    "src",
+    "../../backtesting/frontend",
+    "../../stress_testing/frontend",
+    "../../forward_testing/frontend",
+    "../../paper_trading/frontend",
+    "../../reel_to_backtest/frontend",
+    "../../reel_to_pipeline/frontend"
+  ]
 }

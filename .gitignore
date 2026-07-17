@@ -87,3 +87,4 @@ qa_reports/
 
 # Allow README screenshots
 !docs/screenshots/*.png
+forward_testing/kronos_service/Kronos/

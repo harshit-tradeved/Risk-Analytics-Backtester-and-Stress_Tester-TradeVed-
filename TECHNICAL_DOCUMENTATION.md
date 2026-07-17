@@ -410,5 +410,5 @@ erDiagram
 
 1.  **Thread Blocking on Extraction:** Move synchronous LLM routes in `/api/reel/analyze` to a background task runner. Deploy **Redis** and **RQ** (Redis Queue) to isolate inference workloads from client requests.
 2.  **SQLite Writer Locks:** SQLite handles concurrent reads but serializes writes. As outcome logs scale, migrate the backend connection string (`DATABASE_URL`) to **PostgreSQL**.
-3.  **HMM Regime Upgrades:** Replace the Moving Average regime detection in `backtesting/engine/regimes.py` with a multi-state Hidden Markov Model (HMM) to capture regime volatility shifts.
+3.  **HMM Regime Upgrades:** Replace the Moving Average regime detection in `backtesting/backend/engine/regimes.py` with a multi-state Hidden Markov Model (HMM) to capture regime volatility shifts.
 4.  **Vite Proxy Timeout Configurations:** Streaming endpoints can close due to HTTP gateway timeouts. Verify that both Railway's upstream proxy and Vercel's Edge routes allow long-lived connections.

@@ -1,4 +1,4 @@
-from reel_to_backtest.ir_validator import normalize_ir, validate_ir
+from reel_to_backtest.backend.ir_validator import normalize_ir, validate_ir
 
 
 def test_normalize_ir_hoists_flat_custom_shape_into_strategy_params():
@@ -126,7 +126,7 @@ def test_normalize_ir_parses_dsl_expression_string_rules():
     plain DSL strings, so validate_ir reported 'rule must be a dict' and the
     frontend rendered '? undefined ?'. Simple <operand> <op> <operand>
     expressions are deterministically parseable."""
-    from reel_to_backtest.ir_validator import _normalize_rule
+    from reel_to_backtest.backend.ir_validator import _normalize_rule
 
     assert _normalize_rule("rsi(14) < 30") == {
         "left": {"indicator": "rsi", "params": {"length": 14}},
@@ -165,7 +165,7 @@ def test_normalize_ir_parses_dsl_expression_string_rules():
 def test_normalize_ir_leaves_unparseable_strings_unchanged():
     """Garbage / ambiguous strings must pass through untouched so validate_ir
     reports them exactly as before."""
-    from reel_to_backtest.ir_validator import _normalize_rule
+    from reel_to_backtest.backend.ir_validator import _normalize_rule
 
     assert _normalize_rule("buy the dip when it feels right") == \
         "buy the dip when it feels right"

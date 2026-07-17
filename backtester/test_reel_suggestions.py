@@ -3,7 +3,7 @@ symbol/source/interval must be coerced to the exact values the frontend
 selects and the data fetchers accept (live E2E, 2026-07-10: the endpoint
 returned symbol="BTCUSD", source="BINANCE" raw, auto-filling the config with
 an invalid symbol/source pair)."""
-from reel_to_backtest.reel_extractor import normalize_suggestions
+from reel_to_backtest.backend.reel_extractor import normalize_suggestions
 
 
 def test_live_e2e_case_btcusd_binance():

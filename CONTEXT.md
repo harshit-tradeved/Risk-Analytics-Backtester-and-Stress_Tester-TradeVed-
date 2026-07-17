@@ -23,7 +23,7 @@ python main.py
 ## Feature Status
 
 ### Feature A — Timeframe-Aware Regime Detection ✅ DONE
-**File:** `backtesting/engine/regimes.py`
+**File:** `backtesting/backend/engine/regimes.py`
 
 - Regime labels (bull/bear/sideways) now use real trading-day MA windows regardless of candle interval.
 - A 1d and 4h backtest of the same period produce semantically equivalent labels.
@@ -34,7 +34,7 @@ python main.py
 
 ### Feature B — Stress Tester ✅ DONE (full stack)
 
-#### B1 — Backend (`stress_testing/stress.py` + `main.py`)
+#### B1 — Backend (`stress_testing/backend/stress.py` + `main.py`)
 
 **13 Scenario Presets:**
 
@@ -150,31 +150,31 @@ Each MC run uses `run_severity = severity × uniform(0.75, 1.25)`. Both timing A
 ### New files (session 3)
 | File | Purpose |
 |------|---------|
-| `frontend/src/components/stress_testing/MCPathsCanvas.tsx` | Canvas-based MC paths chart: rainbow colors, hover, click-to-pin, delta view, incremental draw |
+| `frontend/src/stress_testing/frontend/MCPathsCanvas.tsx` | Canvas-based MC paths chart: rainbow colors, hover, click-to-pin, delta view, incremental draw |
 
 ### New files (session 1–2)
 | File | Purpose |
 |------|---------|
-| `stress_testing/stress.py` | Stress engine: 13 scenarios, `apply_stress()`, `run_stress_backtest()`, `aggregate_stress_results()` |
-| `frontend/src/components/stress_testing/StressPage.tsx` | Stress page root — SSE streaming state machine + live loading view |
-| `frontend/src/components/stress_testing/StressSidebar.tsx` | Stress form controls |
-| `frontend/src/components/stress_testing/StressResults.tsx` | Results panel: verdict, compare cards, MCPathsCard, MC panels |
+| `stress_testing/backend/stress.py` | Stress engine: 13 scenarios, `apply_stress()`, `run_stress_backtest()`, `aggregate_stress_results()` |
+| `frontend/src/stress_testing/frontend/StressPage.tsx` | Stress page root — SSE streaming state machine + live loading view |
+| `frontend/src/stress_testing/frontend/StressSidebar.tsx` | Stress form controls |
+| `frontend/src/stress_testing/frontend/StressResults.tsx` | Results panel: verdict, compare cards, MCPathsCard, MC panels |
 | `stress_validation.py` | 207-test validation script |
 | `CONTEXT.md` | This file |
 
 ### Modified files (session 3)
 | File | What changed |
 |------|-------------|
-| `stress_testing/stress.py` | Added `aggregate_stress_results()`, `run_single_backtest` alias, per-run `uniform(0.75,1.25)` severity jitter |
+| `stress_testing/backend/stress.py` | Added `aggregate_stress_results()`, `run_single_backtest` alias, per-run `uniform(0.75,1.25)` severity jitter |
 | `main.py` | Added `asyncio` import, `StreamingResponse`, `POST /api/stress/stream` SSE endpoint |
 | `frontend/src/api.ts` | Added `streamStressTest()`, `StreamRun` interface |
-| `frontend/src/components/stress_testing/StressPage.tsx` | Full rewrite: streaming state machine, `LiveLoadingView` with live canvas |
-| `frontend/src/components/stress_testing/StressResults.tsx` | Replaced `SpaghettiFanChart` with `MCPathsCard` + `MCPathsCanvas` |
+| `frontend/src/stress_testing/frontend/StressPage.tsx` | Full rewrite: streaming state machine, `LiveLoadingView` with live canvas |
+| `frontend/src/stress_testing/frontend/StressResults.tsx` | Replaced `SpaghettiFanChart` with `MCPathsCard` + `MCPathsCanvas` |
 
 ### Modified files (session 1–2)
 | File | What changed |
 |------|-------------|
-| `backtesting/engine/regimes.py` | Timeframe-aware MA windows |
+| `backtesting/backend/engine/regimes.py` | Timeframe-aware MA windows |
 | `main.py` | `StressRequest` model; `/api/stress/run`; `/api/stress/scenarios` |
 | `frontend/src/App.tsx` | Page state + top nav page pills + stress page routing |
 | `frontend/src/api.ts` | `runStressTest()`, `fetchStressScenarios()` |
@@ -223,7 +223,7 @@ Each MC run uses `run_severity = severity × uniform(0.75, 1.25)`. Both timing A
 ## Architecture Notes for Next Session
 
 **Adding a new stress scenario:**
-1. Add `StressScenario(...)` to `SCENARIO_PRESETS` in `stress_testing/stress.py`
+1. Add `StressScenario(...)` to `SCENARIO_PRESETS` in `stress_testing/backend/stress.py`
 2. Add the scenario handler block in `apply_stress()` (the big `if sname ==` chain)
 3. Add key to `StressScenarioKey` union in `types.ts`
 4. Add to `SCENARIO_DISPLAY`, `SCENARIO_GROUPS`, `SCENARIO_DEFAULTS` in `StressSidebar.tsx`
@@ -237,7 +237,7 @@ Each MC run uses `run_severity = severity × uniform(0.75, 1.25)`. Both timing A
 **SSE streaming architecture:**
 - `POST /api/stress/stream` in `main.py` is the live endpoint
 - Each `apply_stress` + `_single_backtest` call runs via `asyncio.to_thread`
-- After all runs, calls `aggregate_stress_results()` from `stress_testing/stress.py`
+- After all runs, calls `aggregate_stress_results()` from `stress_testing/backend/stress.py`
 - Frontend: `streamStressTest()` in `api.ts` uses `fetch` + `ReadableStream` reader
 - `StressPage.tsx` accumulates `liveRuns[]` as `onRun` fires → `MCPathsCanvas` draws incrementally
 

@@ -3,6 +3,13 @@ export default {
   content: [
     './index.html',
     './src/**/*.{js,ts,jsx,tsx}',
+    // per-project frontend folders at the repo root
+    '../../backtesting/frontend/**/*.{js,ts,jsx,tsx}',
+    '../../stress_testing/frontend/**/*.{js,ts,jsx,tsx}',
+    '../../forward_testing/frontend/**/*.{js,ts,jsx,tsx}',
+    '../../paper_trading/frontend/**/*.{js,ts,jsx,tsx}',
+    '../../reel_to_backtest/frontend/**/*.{js,ts,jsx,tsx}',
+    '../../reel_to_pipeline/frontend/**/*.{js,ts,jsx,tsx}',
   ],
   theme: {
     extend: {

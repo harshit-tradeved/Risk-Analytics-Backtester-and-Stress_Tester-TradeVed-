@@ -1,0 +1,7 @@
+{
+  "name": "tradeved-platform",
+  "private": true,
+  "workspaces": [
+    "backtester/frontend"
+  ]
+}

@@ -22,6 +22,14 @@ Options:
 """
 from __future__ import annotations
 
+# Project packages live at the repo root (one folder per project); make them importable.
+import sys as _sys
+from pathlib import Path as _Path
+_repo_root = str(_Path(__file__).resolve().parent.parent)
+if _repo_root not in _sys.path:
+    _sys.path.insert(1, _repo_root)
+
+
 import argparse
 import json
 import logging
@@ -42,13 +50,13 @@ if sys.platform == "win32":
 # ── Bootstrap path so relative imports work ───────────────────────────────────
 sys.path.insert(0, str(Path(__file__).parent))
 
-from backtesting.data.fetcher    import DataFetcher
-from backtesting.data.validator  import DataValidator
-from backtesting.data.eda        import EDAEngine
-from backtesting.engine.simulator import TradeSimulator
-from backtesting.engine.metrics  import calculate_metrics
-from backtesting.reporting.report import generate_report
-from backtesting.strategies      import STRATEGY_REGISTRY
+from backtesting.backend.data.fetcher    import DataFetcher
+from backtesting.backend.data.validator  import DataValidator
+from backtesting.backend.data.eda        import EDAEngine
+from backtesting.backend.engine.simulator import TradeSimulator
+from backtesting.backend.engine.metrics  import calculate_metrics
+from backtesting.backend.reporting.report import generate_report
+from backtesting.backend.strategies      import STRATEGY_REGISTRY
 
 logging.basicConfig(
     level=logging.INFO,

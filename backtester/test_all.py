@@ -8,15 +8,15 @@ import pandas as pd
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from backtesting.data.fetcher import DataFetcher
-from backtesting.data.validator import DataValidator
-from backtesting.data.indian_assets import get_lot_size, is_indian
-from backtesting.engine.simulator import TradeSimulator
-from backtesting.engine.metrics import calculate_metrics
-from backtesting.engine.cost_models import IndianCostModel
-from backtesting.strategies.grid import GridStrategy
-from backtesting.strategies.dca  import DCAStrategy
-from backtesting.strategies.pla  import PLAStrategy
+from backtesting.backend.data.fetcher import DataFetcher
+from backtesting.backend.data.validator import DataValidator
+from backtesting.backend.data.indian_assets import get_lot_size, is_indian
+from backtesting.backend.engine.simulator import TradeSimulator
+from backtesting.backend.engine.metrics import calculate_metrics
+from backtesting.backend.engine.cost_models import IndianCostModel
+from backtesting.backend.strategies.grid import GridStrategy
+from backtesting.backend.strategies.dca  import DCAStrategy
+from backtesting.backend.strategies.pla  import PLAStrategy
 
 fetcher   = DataFetcher()
 validator = DataValidator()
@@ -543,8 +543,8 @@ run_test("Partial sell WACB", test_partial_sell)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_regime_tf_aware():
-    from backtesting.engine.regimes import classify_regimes
-    from backtesting.engine.metrics import _candles_per_day
+    from backtesting.backend.engine.regimes import classify_regimes
+    from backtesting.backend.engine.metrics import _candles_per_day
     import numpy as np
 
     # Build two DataFrames for the same 2-year window using different fake intervals
@@ -568,7 +568,7 @@ def test_regime_tf_aware():
     cpd_4h    = _candles_per_day(df_4h["timestamp"].tolist())
 
     # Verify window sizing is in comparable real-day units
-    from backtesting.engine.regimes import _candles_per_day as cpd_fn  # noqa
+    from backtesting.backend.engine.regimes import _candles_per_day as cpd_fn  # noqa
     n_d = len(df_daily)
     n_4 = len(df_4h)
 
@@ -602,7 +602,7 @@ run_test("Regime detection is timeframe-aware (Feature A)", test_regime_tf_aware
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_stress_non_mutating():
-    from stress_testing.stress import SCENARIO_PRESETS, apply_stress
+    from stress_testing.backend.stress import SCENARIO_PRESETS, apply_stress
     import numpy as np
 
     n = 300
@@ -629,8 +629,8 @@ def test_stress_non_mutating():
 run_test("apply_stress is pure (non-mutating) + OHLCV consistent (Feature B)", test_stress_non_mutating)
 
 def test_stress_monte_carlo_percentiles():
-    from stress_testing.stress import SCENARIO_PRESETS, run_stress_backtest
-    from backtesting.strategies.dca import DCAStrategy
+    from stress_testing.backend.stress import SCENARIO_PRESETS, run_stress_backtest
+    from backtesting.backend.strategies.dca import DCAStrategy
     import numpy as np
 
     n = 300
@@ -676,7 +676,7 @@ run_test("Stress MC percentiles P5<=P50<=P95 (Feature B)", test_stress_monte_car
 
 
 def test_trade_mc_needs_three_trades():
-    from stress_testing.stress import run_trade_mc
+    from stress_testing.backend.stress import run_trade_mc
 
     trades = [
         {"pnl": 100.0},
@@ -711,7 +711,7 @@ def _synthetic_ohlcv(n=300, seed=7):
 
 
 def test_indicator_reference_values():
-    from backtesting.engine.indicators import compute, INDICATOR_CATALOG, TOTAL_OUTPUT_SERIES
+    from backtesting.backend.engine.indicators import compute, INDICATOR_CATALOG, TOTAL_OUTPUT_SERIES
     # Wilder RSI on the canonical StockCharts series → ~70.5 at index 14
     s = pd.Series([44.34,44.09,44.15,43.61,44.33,44.83,45.10,45.42,45.84,46.08,
                    45.89,46.03,45.61,46.28,46.28,46.00,46.03,46.41,46.22,45.64])
@@ -736,7 +736,7 @@ run_test("Indicator engine reference values (RSI/ATR/MACD/Bollinger)", test_indi
 
 
 def test_indicator_catalog_compute_all():
-    from backtesting.engine.indicators import INDICATOR_CATALOG, compute
+    from backtesting.backend.engine.indicators import INDICATOR_CATALOG, compute
     df = _synthetic_ohlcv()
     # orb (Opening Range Breakout) is structurally intraday-only: on 1-candle-per-day
     # data every row is day_idx=0 (still "inside" the opening range), so it's
@@ -753,7 +753,7 @@ run_test("Indicator catalog: every indicator computes with declared outputs", te
 
 
 def test_orb_intraday():
-    from backtesting.engine.indicators import compute
+    from backtesting.backend.engine.indicators import compute
     import numpy as np
     n = 240
     rng = np.random.default_rng(3)
@@ -776,7 +776,7 @@ run_test("ORB indicator: intraday-only, non-look-ahead", test_orb_intraday)
 
 
 def test_preset_strategies_emit_valid_signals():
-    from backtesting.strategies import STRATEGY_REGISTRY
+    from backtesting.backend.strategies import STRATEGY_REGISTRY
     df = _synthetic_ohlcv()
     presets = ["RSI", "MACD", "BOLLINGER", "SUPERTREND", "DONCHIAN", "MACROSS"]
     for name in presets:
@@ -792,8 +792,8 @@ run_test("Indicator preset strategies emit valid signals", test_preset_strategie
 
 
 def test_custom_strategy_evaluator():
-    from backtesting.strategies import STRATEGY_REGISTRY
-    from backtesting.engine.indicators import compute
+    from backtesting.backend.strategies import STRATEGY_REGISTRY
+    from backtesting.backend.engine.indicators import compute
     import numpy as np
     df = pd.DataFrame()
     n = 250
@@ -819,7 +819,7 @@ run_test("CustomStrategy rule evaluator gates signals correctly", test_custom_st
 
 
 def test_strategy_schema_shape():
-    from backtesting.strategies import STRATEGY_REGISTRY
+    from backtesting.backend.strategies import STRATEGY_REGISTRY
     for name, cls in STRATEGY_REGISTRY.items():
         sch = cls.parameter_schema()
         assert isinstance(sch, dict) and sch, name
